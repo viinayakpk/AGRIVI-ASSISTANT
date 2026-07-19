@@ -2,7 +2,9 @@
 
 **Companion of [`DEPTH-GAP-ANALYSIS.md`](DEPTH-GAP-ANALYSIS.md). What we change, in what order, and what to expect after each change.** (Written when the app was still one file; the same engine now lives in `src/`, built to `dist/agrivi-companion.html` — see the root README.)
 
-This is the delivery document: every change is named against a real function/section in the current file, has a measurable expected outcome, and has a verification step. Nothing here is aspirational — it's a work order.
+> **Note:** kept as a design record, not a description of what ships. Phase 1 (temporal memory, the Foresight agent) and the weather grounding named in Phase 2 are implemented in `dist/agrivi-companion.html` — everything else below (Resolver agent, verify→refine critic loop, Reflector, Cedar/OPA policy engine, MCP) was proposed here but was not built. See the root README's own "Future work" section for what's actually planned next.
+
+This is the delivery document as originally written: every change is named against a real function/section in the current file, has a measurable expected outcome, and has a verification step. Read it as the reasoning trail behind Phase 1, not as a claim about Phases 2–3.
 
 ---
 

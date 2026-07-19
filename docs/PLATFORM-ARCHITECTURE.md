@@ -214,7 +214,7 @@ Money was named the top priority for this round, with an explicit ask for resear
 
 ## 11. Verification
 
-**214 assertions green** across nine suites — the 102 covering the engine's conversational core, 9 circuit-breaker state-machine tests, 36 + 16 from the v2 conversation/outbox harnesses, the tenant seam (7), the web-search decision gate + tier mapping (8), 16 dedicated to session identity (established-from-conversation, coworker-vs-self distinction, cross-session reset, the licence/identity-conflation fix, and the deterministic defense-in-depth strip), 8 proving the prompt-caching request-payload shape, and 12 for the Advisor's semantic cache — including the cross-product collision case as a named regression, not an incidental pass. Gateway boots clean, serves the app, and reports its session/LLM/weather status over `/health`.
+Every area named above — the engine's conversational core, the circuit-breaker state machine, the tenant seam, the web-search decision gate, session identity, the prompt-caching request shape, the Advisor's semantic cache including the cross-product collision case — was exercised against the real file during development, headlessly, driving the actual script rather than a reimplementation. It was never saved as a committed, re-runnable suite; treat the counts in earlier drafts of this document as a development log, not a checkable artifact. (The gateway's own `/health` check is no longer applicable — `gateway/` was removed, see the note at the top of this document.)
 
 ---
 

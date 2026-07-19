@@ -83,48 +83,7 @@ flowchart TB
 
 Not pictured as a node: **Rails** (⑦) — the 5-stage guardrail policy (input/dialog/retrieval/execution/output) isn't a step in the pipeline, it's a check applied *at* each of the stages above, which is why it doesn't have its own box. See [`docs/ARCHITECTURE-v2.md` §6](docs/ARCHITECTURE-v2.md#6-guardrails--nemos-five-rail-stages).
 
-**What actually happens on one message** — the decision tree `turn()` runs every time, including every branch, rejection, and retry path:
-
-```mermaid
-flowchart TD
-    START(["User sends a message"]) --> SCREEN{"② Screen:<br/>injection?"}
-    SCREEN -->|TRIP| REFUSE["Typed refusal<br/>never reaches extraction"]
-    SCREEN -->|PASS| ROUTE{"③ Router:<br/>what is this?"}
-
-    ROUTE -->|cancel| CANCEL["Discard in-progress record"]
-    ROUTE -->|confirm at review| SUBMIT
-    ROUTE -->|reject at review| REPAIR["Ask what to change"]
-    ROUTE -->|amend AGRIVI-WO| AMEND["Re-open collect to review to submit,<br/>linked to the original id"]
-    ROUTE -->|chitchat or question| DEPTH{"Needs live info?<br/>Label question?"}
-    ROUTE -->|provide or correct| LOCK{"Schema already<br/>locked?"}
-
-    DEPTH -->|live + enabled| WS["⑫ Web Search"]
-    DEPTH -->|label question| ADV["⑨ Advisor<br/>semantic cache first"]
-    DEPTH -->|neither| CHAT["⑪ Chat"]
-    WS -->|degraded| CHAT
-    CHAT -->|wants_to_log| LOCK
-
-    LOCK -->|no| CLASSIFY{"⑤ Planner:<br/>classify text"}
-    CLASSIFY -->|recognisable| PLAN["Lock schema, plan order"]
-    CLASSIFY -->|not recognisable| CHAT
-    LOCK -->|yes| EXTRACT
-
-    PLAN --> EXTRACT["① Normalizer if messy<br/>then ④ Extractor"]
-    EXTRACT -->|raw spans, never ids| VERIFY["⑥ Verifier:<br/>the pure tool suite"]
-
-    VERIFY -->|OK| COMMIT["Slot committed"]
-    VERIFY -->|REJECT| ASKAGAIN["Typed reason<br/>+ valid options"]
-    VERIFY -->|AMBIGUOUS| DISAMBIG["Candidates offered"]
-
-    COMMIT --> MORE{"All required<br/>slots filled?"}
-    MORE -->|no| ASK["Ask for the next slot"]
-    MORE -->|yes| REVIEW["⑩ Foresight + ⑧ QA Critic"]
-    REVIEW --> CARD["Structured review card"]
-    CARD -->|user confirms| SUBMIT["Enqueue in outbox,<br/>key = content hash"]
-    SUBMIT --> RETRY{"ACK received?"}
-    RETRY -->|yes| DONE(["Saved: AGRIVI-WO-..."])
-    RETRY -->|no, retry with same key| SUBMIT
-```
+**What actually happens on one message** — cancel/confirm/reject/amend are handled before anything else runs; chitchat or a question goes to Web Search, the Advisor, or Chat (which can still flag `wants_to_log` and fall through); a work description locks the schema (or re-locks it, if what's said now clearly names a *different* kind of job) and walks Normalizer → Extractor → Verifier per slot until the record is complete, then Foresight + QA Critic review it before the worker ever sees a submit button. Every branch, rejection, and retry path is the same `turn()` function in [`src/core/11-kernel.js`](src/core/11-kernel.js) — see [`docs/ARCHITECTURE-v2.md` §2](docs/ARCHITECTURE-v2.md#2-the-pipeline) for the full step-by-step.
 
 ---
 
@@ -227,10 +186,10 @@ Small focused agents make per-agent model choice possible. Verified live against
 
 ### Cost-saving, researched from real GitHub adoption, not guessed
 
-Two techniques are actually implemented, not just cited — see [`docs/PLATFORM-ARCHITECTURE.md` §9](docs/PLATFORM-ARCHITECTURE.md#9-cost--guardrails--researched-from-real-adoption-not-guessed) for the full research trail (RouteLLM, LiteLLM, FrugalGPT, Guardrails AI, NeMo-Guardrails, OWASP LLM Top 10):
+Two techniques are actually implemented, not just cited — full research trail (RouteLLM, LiteLLM, FrugalGPT, Guardrails AI, NeMo-Guardrails, OWASP LLM Top 10) in [`docs/PLATFORM-ARCHITECTURE.md` §9](docs/PLATFORM-ARCHITECTURE.md#9-cost--guardrails--researched-from-real-adoption-not-guessed):
 
-- **Prompt caching** (Anthropic/OpenAI native, [OpenRouter-passthrough](https://openrouter.ai/docs/features/prompt-caching)) — the Extractor and Chat agents re-send a large static block (the field/product/operator catalogue) on every call; it's now sent as its own `cache_control:{type:"ephemeral"}` block, ~90% cheaper on a repeat within a session. [ProjectDiscovery](https://projectdiscovery.io/blog/how-we-cut-llm-cost-with-prompt-caching) reports 60–70% real-world savings from this alone. 8 assertions verify the actual request payload shape.
-- **Semantic response cache for the Advisor** — adapted from [`GPTCache`](https://github.com/zilliztech/GPTCache)'s idea using this codebase's own fuzzy-match scorer instead of a new embedding dependency: the same label question re-typed ("what's the PHI on luna" / "PHI on luna") is served from cache, $0, no round trip. Deliberately scoped to Advisor only (its label data never goes stale mid-session) — Extractor and Chat are excluded because a cache hit there could serve a wrong number or stale memory. A real collision risk (same wording, *different product*, scoring HIGHER on raw similarity than a legitimate reword) was caught by testing, not assumed away — fixed by partitioning the cache on the product actually named, verified by 12 assertions including that exact case as a named regression.
+- **Prompt caching** — the Extractor and Chat agents' static field/product/operator catalogue block is sent as its own [`cache_control:{type:"ephemeral"}`](https://openrouter.ai/docs/features/prompt-caching) block, ~90% cheaper on a repeat within a session ([ProjectDiscovery](https://projectdiscovery.io/blog/how-we-cut-llm-cost-with-prompt-caching) reports 60–70% real-world savings from this alone). Verified against the actual request payload shape sent to OpenRouter.
+- **Semantic response cache for the Advisor** — adapted from [`GPTCache`](https://github.com/zilliztech/GPTCache)'s idea, using this codebase's own fuzzy-match scorer instead of a new embedding dependency. A repeat label question in different words ("what's the PHI on luna" / "PHI on luna") is served from cache, $0, no round trip. Scoped to the Advisor only — a cache hit on Extractor or Chat could serve a stale number. Partitioned on the product actually named, after testing caught a real cross-product collision risk with two different products' names scoring as "the same question."
 
 ## Privacy, audit & correction
 
@@ -245,7 +204,7 @@ Three additions researched against 2026 guardrail/compliance practice and the EU
 ```
 online + key   → OpenRouter        (7 models, tiered)
 offline + Nano → Chrome Prompt API (Gemini Nano, on-device, JSON-schema constrained)
-otherwise      → deterministic     (v1's parser, 36 assertions green)
+otherwise      → deterministic     (v1's parser, verified against the real file)
 ```
 
 Nano needs Chrome 138+, 22 GB free and 16 GB RAM, so it's feature-detected via `LanguageModel.availability()` and silently absent. Tier 3 always works. **Kill the network and the agent still thinks.**
@@ -270,7 +229,7 @@ Nano needs Chrome 138+, 22 GB free and 16 GB RAM, so it's feature-detected via `
 
 ## Verification
 
-**214 assertions green** against the real file (every suite stubs a minimal DOM and drives the actual script via `new Function` — no reimplementation). An earlier iteration (a single-schema, spraying-only version of the same deterministic spine — reducer, tool suite, outbox idempotency) carried 52 assertions of its own before the schema-driven, 12-agent version replaced it.
+Every claim below was exercised against the real file during development — a headless browser driving the actual script, never a reimplementation — not a committed, re-runnable test suite. That's the honest gap to flag: a from-scratch regression harness (the same technique, saved as an actual file instead of run ad hoc) is real, scoped follow-up work, not something to claim as already done.
 
 ```
 input rail      5 attacks TRIP · 5 benign PASS · out-of-range dose PASSES (validation ≠ security)
@@ -319,6 +278,16 @@ Every one of these is the architecture's own claim failing inside the *determini
 **Simplifications** (deliberate): tank mix volume, equipment/nozzle records, multi-block work orders, and re-entry enforcement are out of scope. PHI is computed and displayed but not enforced against a planned harvest date. The "server" is an in-memory `Map`. (Weather/wind capture was on this list originally — it's since been implemented: live, keyless, via Open-Meteo, attached to every record type as informational context, never blocking a submission.)
 
 ---
+
+## Future work
+
+Roughly the order I'd actually build these:
+
+1. **Real AGRIVI 360 integration, not a mirror.** `loadTenant()` is already the seam — swap the in-memory `DEFAULT_TENANT` object for a live read of AGRIVI's field/product/operator master data, and the in-memory `Map` "server" for AGRIVI's real work-order write API. No engine change: the reducer, verifier and rails already read everything through `MIRROR`.
+2. **A real knowledge base behind the Advisor.** Label Q&A currently answers from five products' hardcoded `actives`/`doseMin`/`doseMax` fields. The next step is retrieval over AGRIVI's actual product-label documents and company SOPs/spray-policy text — a real policy database — so the Advisor can answer beyond what the tenant mirror was ever meant to hold, while the mirror stays the sole source of truth for anything that gates a write.
+3. **A per-tenant policy layer above the fixed schema.** Every tenant currently gets the same three schemas and validators. Some coops will need an extra required field or a stricter interval without forking the codebase — a declarative policy layer both the schema and rails read, scoped per tenant the way `SCHEMA.validators` already works per work-order type.
+4. **Actual speech input.** The Normalizer already assumes ASR-shaped noise (disfluency, HR/EN code-switching); a real microphone-to-text path was never wired in — today "talking" means typing. That's the largest gap between this demo and the assignment's premise.
+5. **Server-side key custody.** Flagged as a known tradeoff above — a real deployment proxies the OpenRouter call through AGRIVI's own backend so the device never holds a model key, and that backend is also where tenant resolution belongs.
 
 ## What I'd push back on
 

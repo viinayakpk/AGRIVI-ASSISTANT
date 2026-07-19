@@ -8,7 +8,7 @@
 
 ## 0. The one-paragraph version
 
-A **deterministic kernel** owns control flow, state and every write. Around it sit **nine small, focused agents**, each a node in a workflow rather than an autonomous loop. A **router** decides how many of them run this turn, because multi-agent costs [+58% to +285% in tokens](https://beam.ai/agentic-insights/multi-agent-orchestration-patterns-production) and depth must be earned per-turn, not paid by default. Trust is enforced with [CaMeL](https://simonwillison.net/2025/Apr/11/camel/)'s **Privileged/Quarantined split plus capability (taint) labels**: agents that touch worker speech get no tools, no state, and a typed channel out. The work order itself is **declarative** — a `WorkOrderSchema` — so the same engine runs Spraying, Fertilizing and Harvest, which is the only reason a Planner is honest here rather than theatre.
+A **deterministic kernel** owns control flow, state and every write. Around it sit **twelve small, focused agents**, each a node in a workflow rather than an autonomous loop. A **router** decides how many of them run this turn, because multi-agent costs [+58% to +285% in tokens](https://beam.ai/agentic-insights/multi-agent-orchestration-patterns-production) and depth must be earned per-turn, not paid by default. Trust is enforced with [CaMeL](https://simonwillison.net/2025/Apr/11/camel/)'s **Privileged/Quarantined split plus capability (taint) labels**: agents that touch worker speech get no tools, no state, and a typed channel out. The work order itself is **declarative** — a `WorkOrderSchema` — so the same engine runs Spraying, Fertilizing and Harvest, which is the only reason a Planner is honest here rather than theatre.
 
 ---
 
@@ -132,6 +132,9 @@ utterance
 | ⑦ | **Rails** | P | 5 stages (NeMo taxonomy) | every turn | input/dialog/retrieval/execution/output |
 | ⑧ | **QA Critic** | Q | record + rubric → `Finding[]` | pre-submit | Anthropic *evaluator-optimizer*. Rubric is **explicit** — [open-ended "find problems" underperforms](https://github.com/CSHaitao/Awesome-LLMs-as-Judges) |
 | ⑨ | **Advisor** | Q | question + label → answer | on question | Genuinely open-domain Q&A |
+| ⑩ | **Foresight** | P | record → `Finding[]` | every record | Deterministic, reads the temporal memory graph directly — never calls a model, never degrades |
+| ⑪ | **Chat** | Q | text + state → answer | chitchat/questions | General conversation; flags `wants_to_log` back to the router when a reply is really a work description |
+| ⑫ | **Web Search** | Q | question → grounded answer + citation | only if a deterministic keyword gate fires *and* the agent is toggled on | Its own model, its own circuit breaker, independently toggleable — the only agent allowed to leave farm data |
 
 **Cut:** debate, self-consistency voting, tree search. All 2–5× compute for a task whose ground truth is a database lookup. A critic that disagrees with `check_dose` is *wrong*, not interesting.
 
@@ -158,7 +161,10 @@ Small focused agents make per-agent model choice possible — that's Factor 10 p
 | ④ Extractor | `google/gemini-2.5-flash-lite` | 0.10 | 0.40 | Workhorse: accuracy + strict schema + 1M ctx |
 | ⑤ Planner | `anthropic/claude-haiku-4.5` | 1.00 | 5.00 | Rare (schema change only) |
 | ⑧ QA Critic | `anthropic/claude-opus-4.8` | 5.00 | 25.00 | Once per submit, reviewing a legal record. Worth it |
-| ⑨ Advisor | `anthropic/claude-haiku-4.5` | 1.00 | 5.00 | On demand |
+| ⑨ Advisor | `anthropic/claude-haiku-4.5` | 1.00 | 5.00 | On demand, plus a semantic response cache — a repeat question is $0 |
+| ⑩ Foresight | *(none — deterministic)* | 0 | 0 | Reads the memory graph directly; no model call, so it never degrades |
+| ⑪ Chat | `anthropic/claude-haiku-4.5` | 1.00 | 5.00 | General conversation; FIELDS/PRODUCTS context prompt-cached |
+| ⑫ Web Search | `anthropic/claude-haiku-4.5` | 1.00 | 5.00 | Only when the deterministic gate fires and the agent is toggled on |
 
 Editable at runtime; a live cost meter shows spend per agent per turn. A frontier model on the router would be an architecture smell, and the UI makes that visible.
 
@@ -170,7 +176,7 @@ The v1 thesis, now with three real implementations behind one envelope:
 online + key   →  OpenRouter          (per-agent model tiering)
 offline + Nano →  Chrome Prompt API   (Gemini Nano, on-device,
                                        responseConstraint JSON schema)
-otherwise      →  deterministic NLU   (v1's parser, 36 tests green)
+otherwise      →  deterministic NLU   (v1's parser, verified against the real file)
 ```
 
 Nano needs Chrome 138+, 22 GB free, 16 GB RAM — so it is **feature-detected** via `LanguageModel.availability()` and silently absent. Tier 3 always works. Kill the network and the agent still *thinks*.
@@ -210,7 +216,7 @@ Spans follow [OTel GenAI semantic conventions](https://opentelemetry.io/blog/202
 
 ## 9. What v2 keeps from v1
 
-The event log (`state = fold(events)`), the pure tool suite, the outbox + content-hash idempotency key, and the failure mode: **the write that might have happened**. Those were right. 52 assertions still green.
+The event log (`state = fold(events)`), the pure tool suite, the outbox + content-hash idempotency key, and the failure mode: **the write that might have happened**. Those were right, and stayed unchanged as v1 grew into the schema-driven, 12-agent v2 described above.
 
 ## 10. Failure modes, ranked
 

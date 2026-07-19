@@ -3,6 +3,8 @@
 **AGRIVI Companion Agent · what we lack, why it matters, and exactly how to close it**
 *Grounded in 2026 papers and production repos. Every claim links its source.*
 
+> **Note:** kept as a design record, not a description of what ships. This document diagnosed the gap and proposed a fix; [`CHANGE-PLAN.md`](CHANGE-PLAN.md) tracks which of the proposals were actually built (temporal memory, Foresight, weather grounding) versus which remain proposals only (Resolver, Reflector, Cedar/OPA, MCP).
+
 ---
 
 ## 0. The honest diagnosis, in one paragraph
