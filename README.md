@@ -14,6 +14,120 @@ A schema-driven, multi-agent conversational agent that lets a field worker log a
 
 ---
 
+## Architecture at a glance
+
+Everything below is real — generated from the actual pipeline in `src/core/11-kernel.js`, not an idealized sketch. Trust zones (untrusted → quarantined → privileged) are the load-bearing structure: an agent's *position* in this diagram is a hard guarantee about what it's allowed to touch, enforced in code, not just drawn this way for tidiness.
+
+```mermaid
+flowchart TB
+    U["Field worker<br/>speech / typed text"]
+
+    subgraph SG_U[" UNTRUSTED "]
+        direction TB
+        U
+    end
+
+    subgraph SG_Q[" QUARANTINED — no tools, no state-writes, typed output only "]
+        direction TB
+        SCREEN["② Screen<br/>injection detector"]
+        ROUTER["③ Router<br/>intent + depth"]
+        NORM["① Normalizer<br/>ASR / code-switch"]
+        EXTRACT["④ Extractor<br/>schema to proposal"]
+        CHAT["⑪ Chat<br/>general conversation"]
+        ADVISOR["⑨ Advisor<br/>label Q&A + semantic cache"]
+        WEBSEARCH["⑫ Web Search<br/>gated, toggleable"]
+        CRITIC["⑧ QA Critic<br/>rubric review"]
+    end
+
+    subgraph SG_P[" PRIVILEGED — the kernel: reducer, tools, policy, every write "]
+        direction TB
+        PLANNER["⑤ Planner<br/>elicitation order"]
+        VERIFIER["⑥ Verifier<br/>pure tool suite — only id-minter"]
+        FORESIGHT["⑩ Foresight<br/>reads temporal memory"]
+        LOG[("Event log<br/>state = fold(events)")]
+        OUTBOX[("Outbox<br/>idempotency key")]
+        MEM[("Temporal memory graph")]
+        AUDIT[("Hash-chained<br/>audit log")]
+    end
+
+    subgraph SG_E[" EXTERNAL "]
+        direction TB
+        MODEL{{"OpenRouter / Nano / deterministic"}}
+        AGRIVI[("AGRIVI 360")]
+    end
+
+    U --> SCREEN
+    SCREEN -->|PASS| ROUTER
+    SCREEN -->|TRIP| REFUSE["Typed refusal<br/>still logged, never extracted"]
+    ROUTER -->|chitchat or question| CHAT
+    ROUTER -->|label question| ADVISOR
+    ROUTER -->|needs live info| WEBSEARCH
+    ROUTER -->|provide or correct| PLANNER
+    PLANNER --> NORM --> EXTRACT
+    EXTRACT --> VERIFIER
+    VERIFIER --> LOG
+    LOG -->|REVIEW| FORESIGHT --> CRITIC --> LOG
+    LOG -->|submit| OUTBOX --> AGRIVI
+    CHAT -.-> MODEL
+    ADVISOR -.-> MODEL
+    EXTRACT -.-> MODEL
+    LOG -. chained hash .-> AUDIT
+    VERIFIER -.-> MEM
+    FORESIGHT -.-> MEM
+
+    style SG_U fill:#fdf2f1,stroke:#c2312b,color:#000
+    style SG_Q fill:#fdf8ee,stroke:#b0730c,color:#000
+    style SG_P fill:#f0f8f3,stroke:#0f7a44,color:#000
+    style SG_E fill:#f4f6f5,stroke:#6b7578,color:#000
+```
+
+Not pictured as a node: **Rails** (⑦) — the 5-stage guardrail policy (input/dialog/retrieval/execution/output) isn't a step in the pipeline, it's a check applied *at* each of the stages above, which is why it doesn't have its own box. See [`docs/ARCHITECTURE-v2.md` §6](docs/ARCHITECTURE-v2.md#6-guardrails--nemos-five-rail-stages).
+
+**What actually happens on one message** — the decision tree `turn()` runs every time, including every branch, rejection, and retry path:
+
+```mermaid
+flowchart TD
+    START(["User sends a message"]) --> SCREEN{"② Screen:<br/>injection?"}
+    SCREEN -->|TRIP| REFUSE["Typed refusal<br/>never reaches extraction"]
+    SCREEN -->|PASS| ROUTE{"③ Router:<br/>what is this?"}
+
+    ROUTE -->|cancel| CANCEL["Discard in-progress record"]
+    ROUTE -->|confirm at review| SUBMIT
+    ROUTE -->|reject at review| REPAIR["Ask what to change"]
+    ROUTE -->|amend AGRIVI-WO| AMEND["Re-open collect to review to submit,<br/>linked to the original id"]
+    ROUTE -->|chitchat or question| DEPTH{"Needs live info?<br/>Label question?"}
+    ROUTE -->|provide or correct| LOCK{"Schema already<br/>locked?"}
+
+    DEPTH -->|live + enabled| WS["⑫ Web Search"]
+    DEPTH -->|label question| ADV["⑨ Advisor<br/>semantic cache first"]
+    DEPTH -->|neither| CHAT["⑪ Chat"]
+    WS -->|degraded| CHAT
+    CHAT -->|wants_to_log| LOCK
+
+    LOCK -->|no| CLASSIFY{"⑤ Planner:<br/>classify text"}
+    CLASSIFY -->|recognisable| PLAN["Lock schema, plan order"]
+    CLASSIFY -->|not recognisable| CHAT
+    LOCK -->|yes| EXTRACT
+
+    PLAN --> EXTRACT["① Normalizer if messy<br/>then ④ Extractor"]
+    EXTRACT -->|raw spans, never ids| VERIFY["⑥ Verifier:<br/>the pure tool suite"]
+
+    VERIFY -->|OK| COMMIT["Slot committed"]
+    VERIFY -->|REJECT| ASKAGAIN["Typed reason<br/>+ valid options"]
+    VERIFY -->|AMBIGUOUS| DISAMBIG["Candidates offered"]
+
+    COMMIT --> MORE{"All required<br/>slots filled?"}
+    MORE -->|no| ASK["Ask for the next slot"]
+    MORE -->|yes| REVIEW["⑩ Foresight + ⑧ QA Critic"]
+    REVIEW --> CARD["Structured review card"]
+    CARD -->|user confirms| SUBMIT["Enqueue in outbox,<br/>key = content hash"]
+    SUBMIT --> RETRY{"ACK received?"}
+    RETRY -->|yes| DONE(["Saved: AGRIVI-WO-..."])
+    RETRY -->|no, retry with same key| SUBMIT
+```
+
+---
+
 ## Setup
 
 **Open `dist/agrivi-companion.html` in a browser.** No server, no key. It runs immediately and fully offline.

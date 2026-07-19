@@ -22,6 +22,73 @@ A **deterministic kernel** owns control flow, state and every write. Around it s
 └────────────────────┘   └────────────────────────────┘   └──────────────────────────┘
 ```
 
+The full picture, every agent placed by zone — generated from the actual pipeline in `src/core/11-kernel.js`, not an idealized sketch:
+
+```mermaid
+flowchart TB
+    U["Field worker<br/>speech / typed text"]
+
+    subgraph SG_U[" UNTRUSTED "]
+        direction TB
+        U
+    end
+
+    subgraph SG_Q[" QUARANTINED — no tools, no state-writes, typed output only "]
+        direction TB
+        SCREEN["② Screen<br/>injection detector"]
+        ROUTER["③ Router<br/>intent + depth"]
+        NORM["① Normalizer<br/>ASR / code-switch"]
+        EXTRACT["④ Extractor<br/>schema to proposal"]
+        CHAT["⑪ Chat<br/>general conversation"]
+        ADVISOR["⑨ Advisor<br/>label Q&A + semantic cache"]
+        WEBSEARCH["⑫ Web Search<br/>gated, toggleable"]
+        CRITIC["⑧ QA Critic<br/>rubric review"]
+    end
+
+    subgraph SG_P[" PRIVILEGED — the kernel: reducer, tools, policy, every write "]
+        direction TB
+        PLANNER["⑤ Planner<br/>elicitation order"]
+        VERIFIER["⑥ Verifier<br/>pure tool suite — only id-minter"]
+        FORESIGHT["⑩ Foresight<br/>reads temporal memory"]
+        LOG[("Event log<br/>state = fold(events)")]
+        OUTBOX[("Outbox<br/>idempotency key")]
+        MEM[("Temporal memory graph")]
+        AUDIT[("Hash-chained<br/>audit log")]
+    end
+
+    subgraph SG_E[" EXTERNAL "]
+        direction TB
+        MODEL{{"OpenRouter / Nano / deterministic"}}
+        AGRIVI[("AGRIVI 360")]
+    end
+
+    U --> SCREEN
+    SCREEN -->|PASS| ROUTER
+    SCREEN -->|TRIP| REFUSE["Typed refusal<br/>still logged, never extracted"]
+    ROUTER -->|chitchat or question| CHAT
+    ROUTER -->|label question| ADVISOR
+    ROUTER -->|needs live info| WEBSEARCH
+    ROUTER -->|provide or correct| PLANNER
+    PLANNER --> NORM --> EXTRACT
+    EXTRACT --> VERIFIER
+    VERIFIER --> LOG
+    LOG -->|REVIEW| FORESIGHT --> CRITIC --> LOG
+    LOG -->|submit| OUTBOX --> AGRIVI
+    CHAT -.-> MODEL
+    ADVISOR -.-> MODEL
+    EXTRACT -.-> MODEL
+    LOG -. chained hash .-> AUDIT
+    VERIFIER -.-> MEM
+    FORESIGHT -.-> MEM
+
+    style SG_U fill:#fdf2f1,stroke:#c2312b,color:#000
+    style SG_Q fill:#fdf8ee,stroke:#b0730c,color:#000
+    style SG_P fill:#f0f8f3,stroke:#0f7a44,color:#000
+    style SG_E fill:#f4f6f5,stroke:#6b7578,color:#000
+```
+
+Rails (⑦) isn't pictured as a node above — it's the 5-stage guardrail policy (§6 below) applied *at* each stage, not a step of its own.
+
 Every value carries a **capability label** `{origin, trust, verifiedBy, spanId}`, inherited through the pipeline. Rules the kernel enforces:
 
 1. **No untrusted value may become an id.** Only the verifier mints ids, only from the mirror. There is no code path from model output to a valid `FLD-*`/`PPP-*`.
