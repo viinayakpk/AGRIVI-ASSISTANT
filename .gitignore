@@ -1,0 +1,21 @@
+# The assignment brief itself — marked CONFIDENTIAL by AGRIVI on its cover
+# page. Kept locally for reference; not part of the submission.
+AGRIVI_AI_Engineer_Assignment.pdf
+
+# AI coding tool configuration (skills/hooks) — local tooling, not the project.
+.agents/
+.codex/
+
+# OS junk
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editors
+.vscode/
+.idea/
+
+# Defensive defaults, nothing currently uses these
+node_modules/
+.env
+.env.local

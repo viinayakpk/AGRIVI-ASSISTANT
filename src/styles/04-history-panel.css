@@ -1,0 +1,20 @@
+/* styles/04-history-panel.css
+   Conversations/history side panel (ChatGPT-style). */
+
+/* conversations panel (ChatGPT-style) */
+.hist-panel{position:fixed;top:56px;left:16px;width:300px;max-height:70vh;overflow-y:auto;
+  background:var(--paper,#fff);border:1px solid var(--rule,#DCE2E0);border-radius:12px;
+  box-shadow:0 12px 40px rgba(12,14,13,.18);z-index:70;padding:6px;display:none}
+.hist-panel[data-open="1"]{display:block}
+.hist-hd{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-3,#6B7578);
+  font-weight:700;padding:8px 10px 6px}
+.hist-row{display:flex;flex-direction:column;gap:2px;width:100%;text-align:left;padding:8px 10px;
+  border-radius:8px;border:none;background:none;cursor:pointer}
+.hist-row:hover{background:var(--wash,#F4F6F5)}
+.hist-row.active{background:var(--privileged-bg,#F0F8F3)}
+.hist-title{font-size:13px;font-weight:560;color:var(--ink,#0C0E0D);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.hist-meta{font-family:var(--m,monospace);font-size:10px;color:var(--ink-4,#9AA4A6)}
+.hist-empty{padding:14px 10px;color:var(--ink-4,#9AA4A6);font-size:12px;text-align:center}
+.hist-clear{display:block;width:calc(100% - 12px);margin:6px;padding:8px;border-radius:8px;border:1px solid var(--rule,#DCE2E0);
+  background:none;color:var(--bad,#C2312B);font-size:12px;font-weight:560;cursor:pointer}
+.hist-clear:hover{background:var(--untrusted-bg,#FDF2F1)}

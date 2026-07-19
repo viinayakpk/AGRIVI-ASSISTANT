@@ -1,0 +1,111 @@
+</head>
+<body>
+<a class="skip-link" href="#mainContent">Skip to conversation</a>
+
+<header>
+  <div class="brand">
+    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path d="M4 20c0-8 6-14 16-15 1 11-5 16-13 16H4z" fill="#0F7A44" opacity=".18"/>
+      <path d="M4 20c0-8 6-14 16-15 1 11-5 16-13 16H4z" stroke="#0F7A44" stroke-width="1.6" stroke-linejoin="round"/>
+      <path d="M5 20c3-7 7-10 13-12" stroke="#0F7A44" stroke-width="1.6" stroke-linecap="round"/>
+    </svg>
+    <h1>AGRIVI Field Companion</h1>
+  </div>
+  <button class="tbtn" id="newBtn" type="button" title="Start a new conversation">+ New</button>
+  <button class="tbtn" id="histBtn" type="button" title="Your conversations" aria-haspopup="true">&#9776; Chats</button>
+  <span class="task-sep" aria-hidden="true"></span>
+  <div class="task-label"><span>Current task</span><strong id="woChip">Listening</strong></div>
+  <select id="woType" class="tbtn" title="Switch work order type — replans and clears in-progress fields">
+    <option value="SPRAYING">Spraying</option>
+    <option value="FERTILIZING">Fertilizing</option>
+    <option value="HARVEST">Harvest</option>
+    <option value="GENERIC">Other work</option>
+  </select>
+  <div class="sp"></div>
+  <span id="netChip" class="tbtn" data-net="online" aria-live="polite">Online</span>
+  <button class="tbtn" id="websearchBtn" type="button" aria-pressed="true"
+    title="Web Search agent — its own model call, its own circuit breaker. Only agent allowed to leave farm data. Toggle off to disable it completely.">
+    <span id="websearchLabel">Web search: on</span>
+  </button>
+  <button class="tbtn explain-btn" id="explainBtn" type="button" aria-expanded="false" aria-controls="inspector">
+    <span aria-hidden="true">&#9783;</span><span class="explain-label">How this worked</span>
+    <span class="receipt-mini" id="spend">$0.0000</span><span id="tok" hidden></span>
+  </button>
+</header>
+
+<main id="mainContent" tabindex="-1">
+  <section class="left">
+    <div class="log" id="log" aria-live="polite"></div>
+    <div class="comp">
+      <div class="chips" id="chips"></div>
+      <label class="sr-only" for="input">Message</label>
+      <div class="irow">
+        <textarea id="input" name="work-description" rows="1" autocomplete="off" placeholder="Message…"></textarea>
+        <button class="send" id="send" aria-label="Send">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true" focusable="false"><path d="M4 12h15M13 6l6 6-6 6" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+      </div>
+      <div class="hint" id="hint"></div>
+    </div>
+  </section>
+
+  <div class="drawer-backdrop" id="drawerBackdrop"></div>
+  <aside class="right" id="inspector" aria-label="How this turn worked" aria-hidden="true" inert>
+    <div class="drawer-head">
+      <div><h2>How this turn worked</h2><p id="turnSummary">No activity yet</p></div>
+      <button class="icon-btn" id="drawerClose" type="button" aria-label="Close details">&#10005;</button>
+    </div>
+    <div class="receipt-grid" aria-label="Current turn summary">
+      <div class="receipt-stat"><b id="turnTime">0 ms</b><span>Total time</span></div>
+      <div class="receipt-stat"><b id="turnSteps">0</b><span>Steps</span></div>
+      <div class="receipt-stat"><b id="turnCost">$0.00000</b><span>Estimated cost</span></div>
+    </div>
+    <div class="tabs" role="tablist">
+      <button role="tab" id="tab-activity" data-tab="activity" aria-selected="true" aria-controls="pane-activity">Activity</button>
+      <button role="tab" id="tab-data" data-tab="data" aria-selected="false" aria-controls="pane-data">Captured data</button>
+      <button role="tab" id="tab-delivery" data-tab="delivery" aria-selected="false" aria-controls="pane-delivery">Delivery</button>
+    </div>
+    <div class="pane" id="pane-activity" role="tabpanel" aria-labelledby="tab-activity" data-pane="activity" data-on="1">
+      <p class="sec">Current turn</p>
+      <div id="traceList"></div>
+      <details class="technical">
+        <summary>Technical details</summary>
+        <div class="technical-body">
+          <p class="sec">Safety checks</p><div id="railList"></div>
+          <div id="cbList"></div>
+          <p class="sec">Model routing</p><div id="modelList"></div>
+          <p class="sec">Session spend</p><div id="spendList"></div>
+          <div class="drawer-tools">
+            <button class="tbtn" id="keyBtn" type="button">Connect provider</button>
+            <button class="tbtn" id="auditVerifyBtn" type="button" title="Recompute the hash chain over every event this session and confirm nothing was altered">Verify audit log</button>
+            <button class="tbtn" id="auditExportBtn" type="button" title="Download the full tamper-evident event log as JSON">Export audit log</button>
+          </div>
+        </div>
+      </details>
+    </div>
+    <div class="pane" id="pane-data" role="tabpanel" aria-labelledby="tab-data" data-pane="data">
+      <p class="sec">Validated work details <span id="schemaName" class="mono"></span></p>
+      <div id="slotList"></div>
+      <p class="sec">Needs attention</p><div id="rejList"></div>
+    </div>
+    <div class="pane" id="pane-delivery" role="tabpanel" aria-labelledby="tab-delivery" data-pane="delivery">
+      <p class="sec">Submission status</p><div id="obList"></div>
+      <p class="sec">AGRIVI 360 record</p><div id="srvList"></div>
+    </div>
+  </aside>
+</main>
+
+<div class="modal" id="modal" role="dialog" aria-modal="true" aria-labelledby="providerTitle"><div class="card">
+  <h2 id="providerTitle">Connect OpenRouter</h2>
+  <p>Uses real models for language processing. Without a key, the companion uses on-device or deterministic processing.</p>
+  <div class="note"><b>Demo-only path.</b> This calls OpenRouter directly from the browser, exposing the key to client-side code. It exists so the file opens and works with zero setup. Production proxies through AGRIVI's backend; the device never holds a model key. Stored in <code>sessionStorage</code>, dies with the tab.</div>
+  <label class="input-label" for="keyIn">OpenRouter API key</label>
+  <input id="keyIn" name="openrouter-api-key" type="password" placeholder="sk-or-v1-…" autocomplete="off" spellcheck="false" />
+  <div class="acts" style="padding:0">
+    <button class="btn p" id="keySave">Use OpenRouter</button>
+    <button class="btn g" id="keyClear">Clear</button>
+    <button class="btn g" id="keyCancel">Cancel</button>
+  </div>
+</div></div>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
