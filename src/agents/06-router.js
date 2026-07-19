@@ -15,12 +15,22 @@ const AgentRouter = {
     // else is going on — it's the trigger the "Amend this record" chip sends.
     const amendMatch=text.trim().match(/^amend\s+(AGRIVI-WO-[A-Za-z0-9]+)/i);
     if(amendMatch) return {intent:"amend",messy:false,needs_normalizer:false,by:"heuristic",cost:0,amendsId:amendMatch[1].toUpperCase()};
-    // Deterministic fast paths — no model needed, and identical offline.
-    if(/^(yes|yep|yeah|ok|okay|correct|confirm|da|submit|send|looks good)\b/.test(t))
+    // Deterministic fast paths — no model needed, and identical offline. These
+    // lists can never be exhaustive, but narrow ones are exactly what makes a
+    // conversation feel like a form with extra steps: a worker who says "yup"
+    // or "nah" or "never mind" is being perfectly clear, and having to fall
+    // through to a live model call (or the offline heuristic guess) for
+    // ordinary words like that is the kind of unnatural friction worth closing
+    // deterministically, the same way "yes"/"no" already were.
+    // norm() turns an apostrophe into a SPACE, not nothing — "that's" becomes
+    // "that s" (three tokens), not "thats" — so "that s right" is what
+    // actually needs matching here, not the apostrophe'd or naively-squashed
+    // forms either one of which silently never matches.
+    if(/^(yes|yep|yeah|yea|yup|sure|ok|okay|correct|confirm|da|submit|send|looks good|sounds good|go ahead|that s right|perfect|great)\b/.test(t))
       return {intent:"confirm",messy:false,needs_normalizer:false,by:"heuristic",cost:0};
-    if(/^(no|nope|wrong|not right|ne|change|fix|edit)\b/.test(t))
+    if(/^(no|nope|nah|wrong|not right|not quite|incorrect|ne|change|fix|edit)\b/.test(t))
       return {intent:"reject",messy:false,needs_normalizer:false,by:"heuristic",cost:0};
-    if(/\b(cancel|abort|discard|start over)\b/.test(t))
+    if(/\b(cancel|abort|discard|start over|never ?mind|forget it|nvm)\b/.test(t))
       return {intent:"cancel",messy:false,needs_normalizer:false,by:"heuristic",cost:0};
     if(/^(hi|hey|hello|yo|good (morning|afternoon|evening)|dobar dan|bok|thanks|thank you|cheers|hvala)\b/.test(t))
       return {intent:"chitchat",messy:false,needs_normalizer:false,by:"heuristic",cost:0};

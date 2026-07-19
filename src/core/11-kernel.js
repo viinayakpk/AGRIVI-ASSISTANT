@@ -84,9 +84,42 @@ async function turn(text){
     (awaiting || Object.values(S.slots).some(sl=>sl.status==="filled"||(Array.isArray(sl.value)&&sl.value.length)));
   let chatWantsLog=false;
   if(rt.intent==="chitchat" || rt.intent==="question"){
-    // The Web Search agent gets first refusal on anything that looks like it
-    // needs live/current info — but ONLY if the worker has left it enabled.
-    // Disabled means disabled: the router never even asks the question.
+    // Weather gets first refusal, ahead of Web Search: it's a real, free,
+    // keyless, already-integrated data source (Open-Meteo, same one the
+    // review card uses) — no reason to spend a Web Search call, or fall
+    // through to Chat's honest "I don't have live data" degradation, when the
+    // answer is one fetch away. Needs a resolved field to fetch coordinates
+    // for; if none is established yet, ask rather than guess — same rule
+    // identity and every other slot already follows.
+    if(needsWeather(text) && NET!=="offline" && !KILL){
+      const fld=S.slots.field.value;
+      if(fld){
+        pipe("weather","run");
+        const wx=await groundWeather(fld.id);
+        span("invoke_agent",{"agent.id":"weather","weather.ok":!!wx},0,"P");
+        pipe("weather","done"); hideTyping();
+        if(wx){ GROUNDED[fld.id]=wx;
+          const back = inFlow ? phrase(nextDirective(S),S) : {text:""};
+          // B() escapes its own argument internally — the outer template must
+          // NOT also go through esc(), or its <b> tags get escaped into
+          // literal text instead of rendering (same rule the amend/submit
+          // success messages already follow correctly, elsewhere in this file).
+          emit("AGENT_UTTERANCE",{ack:`${B(fld.name)}: ${wx.windKph} km/h wind, ${wx.tempC}°C, ${wx.humidity}% humidity — live from ${wx.source}.`,
+            text:back.kind==="review"?"":(back.text||""),kind:back.kind==="review"?"say":(back.kind||"say"),
+            src:"weather:open-meteo",ms:Math.round(performance.now()-t0),cost});
+          S=fold(); setChips(back.chips||[]); busy=false; render(); scrollLog(); return;
+        }
+        // Provider unreachable — fall through to Chat, honestly flagged, same as a degraded Web Search.
+      } else {
+        hideTyping();
+        emit("AGENT_UTTERANCE",{ack:null,text:"Which field? I can pull live conditions for it.",kind:"say",src:"kernel",ms:0,cost});
+        S=fold(); setChips(MIRROR.fields.slice(0,4).map(f=>f.name)); busy=false; render(); scrollLog(); return;
+      }
+    } else if(needsWeather(text)) pipe("weather","skip");
+
+    // The Web Search agent gets first refusal on anything ELSE that looks
+    // like it needs live/current info — but ONLY if the worker has left it
+    // enabled. Disabled means disabled: the router never even asks the question.
     const wantsLive = AgentWebSearch.needs(text);
     if(wantsLive && AgentWebSearch.enabled() && !cbOpen("websearch")){
       pipe("websearch","run");
@@ -144,10 +177,22 @@ async function turn(text){
   /* ⑤ INTENT — the Planner decides WHAT this is before we extract. The worker
      never picked a category; the agent infers it from what they said, locks it
      for the session, and re-plans the elicitation. This is what makes the
-     Planner honest: it now classifies AND plans. */
-  if(!SCHEMA_LOCKED && (rt.intent==="provide"||rt.intent==="correct"||chatWantsLog)){
+     Planner honest: it now classifies AND plans.
+     Re-run even once SCHEMA_LOCKED — not just on the first message. A worker
+     mid-spraying-flow who says "actually I did fertiliser today" is reporting
+     a DIFFERENT work order, not answering the spraying question we last asked;
+     without this, the kernel kept walking the OLD schema's slots and asked a
+     spraying question about a fertilising job. classifyWorkOrder's keyword
+     lists are narrow category words (fertilis/nitrogen/spray/harvest…), not
+     everyday vocabulary, so an ordinary slot answer essentially never collides
+     with them — and it's the SAME deterministic classifier every other branch
+     already trusts, never a fresh guess, so this stays exactly as rule-based
+     and auditable as the very first classification. */
+  const type0=(rt.intent==="provide"||rt.intent==="correct"||chatWantsLog) ? AgentPlanner.classify(text) : null;
+  const switching = SCHEMA_LOCKED && type0 && type0!==SCHEMA.type;
+  if((!SCHEMA_LOCKED && (rt.intent==="provide"||rt.intent==="correct"||chatWantsLog)) || switching){
     pipe("kernel","run");
-    const type=AgentPlanner.classify(text);
+    const type=type0;
     // Unconditional, not just "if the type changed": we're inside !SCHEMA_LOCKED,
     // so this is always a FRESH lock-in — including re-describing work after a
     // CANCEL, which leaves phase="cancelled" and old slots sitting in state.
@@ -156,6 +201,9 @@ async function turn(text){
     // kind of work order (the common case — SPRAYING is the default) left
     // nextDirective() permanently short-circuited to CANCELLED: the record kept
     // committing behind the scenes while the UI insisted nothing was written.
+    // (When `switching` is what got us here, `type` is guaranteed truthy, so
+    // the "not recognisable" branch below is unreachable for a schema switch —
+    // it only ever fires on the original first-message path.)
     if(type){ SCHEMA=SCHEMAS[type]; emit("SCHEMA_CHANGED",{type}); S=fold(); PLAN=await AgentPlanner.run(); SCHEMA_LOCKED=true; }
     else {
       // Not a recognisable work order — treat it as conversation rather than
@@ -168,7 +216,7 @@ async function turn(text){
       emit("AGENT_UTTERANCE",{ack:null,text:esc(a.answer)+citeFooter(a),kind:"say",src:a.by,ms:Math.round(performance.now()-t0),cost});
       S=fold(); setChips([]); busy=false; render(); scrollLog(); return;
     }
-    span("invoke_agent",{"agent.id":"planner","planner.intent":SCHEMA.type,"planner.locked":SCHEMA_LOCKED},0,"P");
+    span("invoke_agent",{"agent.id":"planner","planner.intent":SCHEMA.type,"planner.locked":SCHEMA_LOCKED,"planner.switched":switching},0,"P");
     pipe("kernel","done");
   }
   // A one-word category answer to the question above locks the schema.

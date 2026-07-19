@@ -47,7 +47,15 @@ function verify(P){
     } else emit("SLOT_COMMITTED",{slot:"products",raw:it.product_text,cap:cap("resolve_product"),value:{...base,dose:null}});
   }
   if(P.date_text){
-    const r=callTool("check_date",{iso:P.date_text});
+    // The LIVE extractor is told to emit what was SAID, not resolve it (that's
+    // deliberate — the same "hand over the raw span" rule that keeps field and
+    // product names from being wrongly pre-resolved). A date has no such
+    // ambiguity to preserve, so resolve it here rather than trust the model to
+    // have already normalized "today"/"Monday"/etc — falls back to the
+    // original text if it's not a recognisable expression, so check_date's
+    // rejection still names what was actually said instead of "null".
+    const resolved=resolveDateExpr(P.date_text)||P.date_text;
+    const r=callTool("check_date",{iso:resolved});
     if(r.verdict==="OK") emit("SLOT_COMMITTED",{slot:"date",raw:P.date_text,cap:cap("check_date"),value:{iso:r.iso,daysAgo:r.daysAgo}});
     else emit("SLOT_REJECTED",{slot:"date",raw:P.date_text,code:r.code,detail:r.detail});
   }

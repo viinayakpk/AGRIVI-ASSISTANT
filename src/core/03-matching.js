@@ -35,3 +35,39 @@ function match(q,rows,nameOf){ return rows.map(r=>{ let b={score:0,span:""};
   for(const n of [nameOf(r),...(r.aliases||[])]){ const x=bestSpan(q,n); if(x.score>b.score) b=x; }
   return {row:r,score:b.score,span:b.span}; }).sort((a,b)=>b.score-a.score); }
 
+/* Resolves a natural date expression — "today", "Monday", "3 days ago", an
+   explicit 2026-03-15 or 15/03/2026 — to YYYY-MM-DD. Shared by LocalExtractor
+   (which scans a whole utterance) and the verifier (which normalizes whatever
+   date_text the LIVE extractor already pulled out), so a worker gets the same
+   answer regardless of which tier is running. Returns null on no match so
+   each caller picks its own fallback — LocalExtractor leaves the slot empty,
+   the verifier falls back to the original text so check_date's rejection
+   still names what was actually said.
+
+   Matched against the RAW text, not norm(text): norm() strips "-" and "/"
+   (only "." survives, since its allowed-char set is a-z/0-9/whitespace/period)
+   — matching the ISO/EU regexes against normalized text meant an explicitly
+   typed "2026-03-15" or "15/03/2026" was silently unparseable; only the
+   period-separated form ("15.03.2026") ever actually matched. */
+const WEEKDAYS=["sunday","monday","tuesday","wednesday","thursday","friday","saturday"];
+function resolveDateExpr(text){
+  if(!text) return null;
+  if(/^\d{4}-\d{2}-\d{2}$/.test(text)) return text;
+  const t=norm(text);
+  if(/\b(today|this morning|this afternoon|tonight|just now|danas)\b/.test(t)) return todayISO();
+  if(/\b(yesterday|last night|jucer)\b/.test(t)) return shiftISO(-1);
+  const daysAgo=t.match(/\b(\d+)\s*days?\s*ago\b/);
+  if(daysAgo) return shiftISO(-parseInt(daysAgo[1],10));
+  for(let i=0;i<WEEKDAYS.length;i++){
+    if(new RegExp(`\\b${WEEKDAYS[i]}\\b`).test(t)){
+      const diff=(new Date().getDay()-i+7)%7;   // 0 = today, otherwise the most recent past occurrence
+      return shiftISO(-diff);
+    }
+  }
+  const iso=text.match(/(\d{4})-(\d{2})-(\d{2})/);
+  if(iso) return iso[0];
+  const eu=text.match(/(\d{1,2})[./](\d{1,2})[./](\d{4})/);
+  if(eu) return `${eu[3]}-${String(eu[2]).padStart(2,"0")}-${String(eu[1]).padStart(2,"0")}`;
+  return null;
+}
+

@@ -99,6 +99,15 @@ const shiftFrom=(iso,d)=>new Date(Date.parse(iso)+d*864e5).toISOString().slice(0
 const FIELD_COORDS = { "FLD-101":[45.553,18.690], "FLD-102":[45.541,18.712],
   "FLD-201":[45.492,18.601], "FLD-301":[45.604,18.752], "FLD-302":[45.621,18.684] };
 const DRIFT_KPH = 19;
+// A worker asking "what's the weather" was falling through to Chat, which has
+// no live data and honestly says so — while a real, free, keyless weather
+// integration (Open-Meteo, above) already exists for the review card. Same
+// bug class as the Advisor being fully built but never wired into turn():
+// the capability existed, the conversational path to it didn't. Deliberately
+// deterministic, same discipline as needsWebSearch/needsAdvisor — the kernel
+// decides a question is weather-shaped, never the model.
+const WEATHER_Q_RE=/\b(weather|forecast|raining|rain|windy|wind speed|temperature|how (hot|cold)|humid)\b/i;
+function needsWeather(text){ return WEATHER_Q_RE.test(text); }
 const usingGateway = () => location.protocol === "http:" || location.protocol === "https:";
 const WX_CACHE = {};
 const GROUNDED = {};   // fieldId → last grounded conditions, for the review card

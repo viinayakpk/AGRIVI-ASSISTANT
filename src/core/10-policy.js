@@ -44,13 +44,12 @@ function phrase(d,st){
         return {text:fill(E.dose,{product:d.product.name,range:`${p.doseMin}-${p.doseMax} ${p.unit}`}),
           chips:[`${p.doseMin} ${p.unit}`,`${p.doseMax} ${p.unit}`]}; }
       case "date": return {text:E.date,chips:["Today","Yesterday"]};
-      case "operator": {
-        // "Me" is only a meaningful shortcut once we know who that is —
-        // offering it before then would be a UI-level version of the same
-        // guess-the-name bug. Once known, don't also list that person by name.
-        const names=MIRROR.operators.filter(o=>o.id!==st.identity).map(o=>o.name);
-        return {text:E.operator, chips: st.identity ? ["Me",...names] : names};
-      }
+      // No chips: offering the operator roster as tap-targets meant handing a
+      // worker three names before they'd said anything — jarring, and in
+      // spirit the same guess-the-name problem the identity system exists to
+      // avoid. Typing "me" still correctly triggers the identity question
+      // ("I don't know who you are yet — what's your name?") exactly as before.
+      case "operator": return {text:E.operator};
       case "yield": return {text:E.yield,chips:["7.2 t/ha","9 t/ha"]};
       case "moisture": return {text:E.moisture,chips:["13%","18%"]};
       case "note": return {text:E.note};

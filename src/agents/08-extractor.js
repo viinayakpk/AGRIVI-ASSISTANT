@@ -87,11 +87,7 @@ const LocalExtractor = {
     else if(/\bhalf a (lit(re|er))\b/.test(t)){ dose=0.5; unit="L/ha"; }
     if(dose==null&&(ctx.awaiting==="dose"||/\b(rate|dose|per ha|per hectare)\b/.test(t))){
       const b=t.match(/(?:^|\s)(\d+(?:[.,]\d+)?)(?:\s|$)/); if(b) dose=parseFloat(b[1].replace(",",".")); }
-    if(/\b(today|this morning|this afternoon|just now|danas)\b/.test(t)) P.date_text=todayISO();
-    else if(/\b(yesterday|jucer)\b/.test(t)) P.date_text=shiftISO(-1);
-    else { const iso=t.match(/(\d{4})-(\d{2})-(\d{2})/), eu=t.match(/(\d{1,2})[./](\d{1,2})[./](\d{4})/);
-      if(iso) P.date_text=iso[0];
-      else if(eu) P.date_text=`${eu[3]}-${String(eu[2]).padStart(2,"0")}-${String(eu[1]).padStart(2,"0")}`; }
+    P.date_text=resolveDateExpr(text);
     const fs=match(text,MIRROR.fields,f=>f.name)[0];
     if(fs&&fs.score>=0.55) P.field_text=fs.span;
     if(SCHEMA.slots.includes("products")){

@@ -812,6 +812,15 @@ const shiftFrom=(iso,d)=>new Date(Date.parse(iso)+d*864e5).toISOString().slice(0
 const FIELD_COORDS = { "FLD-101":[45.553,18.690], "FLD-102":[45.541,18.712],
   "FLD-201":[45.492,18.601], "FLD-301":[45.604,18.752], "FLD-302":[45.621,18.684] };
 const DRIFT_KPH = 19;
+// A worker asking "what's the weather" was falling through to Chat, which has
+// no live data and honestly says so — while a real, free, keyless weather
+// integration (Open-Meteo, above) already exists for the review card. Same
+// bug class as the Advisor being fully built but never wired into turn():
+// the capability existed, the conversational path to it didn't. Deliberately
+// deterministic, same discipline as needsWebSearch/needsAdvisor — the kernel
+// decides a question is weather-shaped, never the model.
+const WEATHER_Q_RE=/\b(weather|forecast|raining|rain|windy|wind speed|temperature|how (hot|cold)|humid)\b/i;
+function needsWeather(text){ return WEATHER_Q_RE.test(text); }
 const usingGateway = () => location.protocol === "http:" || location.protocol === "https:";
 const WX_CACHE = {};
 const GROUNDED = {};   // fieldId → last grounded conditions, for the review card
@@ -1034,6 +1043,42 @@ function bestSpan(u,name){ const ut=tokens(u),nt=tokens(name);
 function match(q,rows,nameOf){ return rows.map(r=>{ let b={score:0,span:""};
   for(const n of [nameOf(r),...(r.aliases||[])]){ const x=bestSpan(q,n); if(x.score>b.score) b=x; }
   return {row:r,score:b.score,span:b.span}; }).sort((a,b)=>b.score-a.score); }
+
+/* Resolves a natural date expression — "today", "Monday", "3 days ago", an
+   explicit 2026-03-15 or 15/03/2026 — to YYYY-MM-DD. Shared by LocalExtractor
+   (which scans a whole utterance) and the verifier (which normalizes whatever
+   date_text the LIVE extractor already pulled out), so a worker gets the same
+   answer regardless of which tier is running. Returns null on no match so
+   each caller picks its own fallback — LocalExtractor leaves the slot empty,
+   the verifier falls back to the original text so check_date's rejection
+   still names what was actually said.
+
+   Matched against the RAW text, not norm(text): norm() strips "-" and "/"
+   (only "." survives, since its allowed-char set is a-z/0-9/whitespace/period)
+   — matching the ISO/EU regexes against normalized text meant an explicitly
+   typed "2026-03-15" or "15/03/2026" was silently unparseable; only the
+   period-separated form ("15.03.2026") ever actually matched. */
+const WEEKDAYS=["sunday","monday","tuesday","wednesday","thursday","friday","saturday"];
+function resolveDateExpr(text){
+  if(!text) return null;
+  if(/^\d{4}-\d{2}-\d{2}$/.test(text)) return text;
+  const t=norm(text);
+  if(/\b(today|this morning|this afternoon|tonight|just now|danas)\b/.test(t)) return todayISO();
+  if(/\b(yesterday|last night|jucer)\b/.test(t)) return shiftISO(-1);
+  const daysAgo=t.match(/\b(\d+)\s*days?\s*ago\b/);
+  if(daysAgo) return shiftISO(-parseInt(daysAgo[1],10));
+  for(let i=0;i<WEEKDAYS.length;i++){
+    if(new RegExp(`\\b${WEEKDAYS[i]}\\b`).test(t)){
+      const diff=(new Date().getDay()-i+7)%7;   // 0 = today, otherwise the most recent past occurrence
+      return shiftISO(-diff);
+    }
+  }
+  const iso=text.match(/(\d{4})-(\d{2})-(\d{2})/);
+  if(iso) return iso[0];
+  const eu=text.match(/(\d{1,2})[./](\d{1,2})[./](\d{4})/);
+  if(eu) return `${eu[3]}-${String(eu[2]).padStart(2,"0")}-${String(eu[1]).padStart(2,"0")}`;
+  return null;
+}
 
 // core/04-capability.js
 // §3 — capability / taint labels (CaMeL).
@@ -1634,12 +1679,22 @@ const AgentRouter = {
     // else is going on — it's the trigger the "Amend this record" chip sends.
     const amendMatch=text.trim().match(/^amend\s+(AGRIVI-WO-[A-Za-z0-9]+)/i);
     if(amendMatch) return {intent:"amend",messy:false,needs_normalizer:false,by:"heuristic",cost:0,amendsId:amendMatch[1].toUpperCase()};
-    // Deterministic fast paths — no model needed, and identical offline.
-    if(/^(yes|yep|yeah|ok|okay|correct|confirm|da|submit|send|looks good)\b/.test(t))
+    // Deterministic fast paths — no model needed, and identical offline. These
+    // lists can never be exhaustive, but narrow ones are exactly what makes a
+    // conversation feel like a form with extra steps: a worker who says "yup"
+    // or "nah" or "never mind" is being perfectly clear, and having to fall
+    // through to a live model call (or the offline heuristic guess) for
+    // ordinary words like that is the kind of unnatural friction worth closing
+    // deterministically, the same way "yes"/"no" already were.
+    // norm() turns an apostrophe into a SPACE, not nothing — "that's" becomes
+    // "that s" (three tokens), not "thats" — so "that s right" is what
+    // actually needs matching here, not the apostrophe'd or naively-squashed
+    // forms either one of which silently never matches.
+    if(/^(yes|yep|yeah|yea|yup|sure|ok|okay|correct|confirm|da|submit|send|looks good|sounds good|go ahead|that s right|perfect|great)\b/.test(t))
       return {intent:"confirm",messy:false,needs_normalizer:false,by:"heuristic",cost:0};
-    if(/^(no|nope|wrong|not right|ne|change|fix|edit)\b/.test(t))
+    if(/^(no|nope|nah|wrong|not right|not quite|incorrect|ne|change|fix|edit)\b/.test(t))
       return {intent:"reject",messy:false,needs_normalizer:false,by:"heuristic",cost:0};
-    if(/\b(cancel|abort|discard|start over)\b/.test(t))
+    if(/\b(cancel|abort|discard|start over|never ?mind|forget it|nvm)\b/.test(t))
       return {intent:"cancel",messy:false,needs_normalizer:false,by:"heuristic",cost:0};
     if(/^(hi|hey|hello|yo|good (morning|afternoon|evening)|dobar dan|bok|thanks|thank you|cheers|hvala)\b/.test(t))
       return {intent:"chitchat",messy:false,needs_normalizer:false,by:"heuristic",cost:0};
@@ -1800,11 +1855,7 @@ const LocalExtractor = {
     else if(/\bhalf a (lit(re|er))\b/.test(t)){ dose=0.5; unit="L/ha"; }
     if(dose==null&&(ctx.awaiting==="dose"||/\b(rate|dose|per ha|per hectare)\b/.test(t))){
       const b=t.match(/(?:^|\s)(\d+(?:[.,]\d+)?)(?:\s|$)/); if(b) dose=parseFloat(b[1].replace(",",".")); }
-    if(/\b(today|this morning|this afternoon|just now|danas)\b/.test(t)) P.date_text=todayISO();
-    else if(/\b(yesterday|jucer)\b/.test(t)) P.date_text=shiftISO(-1);
-    else { const iso=t.match(/(\d{4})-(\d{2})-(\d{2})/), eu=t.match(/(\d{1,2})[./](\d{1,2})[./](\d{4})/);
-      if(iso) P.date_text=iso[0];
-      else if(eu) P.date_text=`${eu[3]}-${String(eu[2]).padStart(2,"0")}-${String(eu[1]).padStart(2,"0")}`; }
+    P.date_text=resolveDateExpr(text);
     const fs=match(text,MIRROR.fields,f=>f.name)[0];
     if(fs&&fs.score>=0.55) P.field_text=fs.span;
     if(SCHEMA.slots.includes("products")){
@@ -2285,7 +2336,15 @@ function verify(P){
     } else emit("SLOT_COMMITTED",{slot:"products",raw:it.product_text,cap:cap("resolve_product"),value:{...base,dose:null}});
   }
   if(P.date_text){
-    const r=callTool("check_date",{iso:P.date_text});
+    // The LIVE extractor is told to emit what was SAID, not resolve it (that's
+    // deliberate — the same "hand over the raw span" rule that keeps field and
+    // product names from being wrongly pre-resolved). A date has no such
+    // ambiguity to preserve, so resolve it here rather than trust the model to
+    // have already normalized "today"/"Monday"/etc — falls back to the
+    // original text if it's not a recognisable expression, so check_date's
+    // rejection still names what was actually said instead of "null".
+    const resolved=resolveDateExpr(P.date_text)||P.date_text;
+    const r=callTool("check_date",{iso:resolved});
     if(r.verdict==="OK") emit("SLOT_COMMITTED",{slot:"date",raw:P.date_text,cap:cap("check_date"),value:{iso:r.iso,daysAgo:r.daysAgo}});
     else emit("SLOT_REJECTED",{slot:"date",raw:P.date_text,code:r.code,detail:r.detail});
   }
@@ -2370,13 +2429,12 @@ function phrase(d,st){
         return {text:fill(E.dose,{product:d.product.name,range:`${p.doseMin}-${p.doseMax} ${p.unit}`}),
           chips:[`${p.doseMin} ${p.unit}`,`${p.doseMax} ${p.unit}`]}; }
       case "date": return {text:E.date,chips:["Today","Yesterday"]};
-      case "operator": {
-        // "Me" is only a meaningful shortcut once we know who that is —
-        // offering it before then would be a UI-level version of the same
-        // guess-the-name bug. Once known, don't also list that person by name.
-        const names=MIRROR.operators.filter(o=>o.id!==st.identity).map(o=>o.name);
-        return {text:E.operator, chips: st.identity ? ["Me",...names] : names};
-      }
+      // No chips: offering the operator roster as tap-targets meant handing a
+      // worker three names before they'd said anything — jarring, and in
+      // spirit the same guess-the-name problem the identity system exists to
+      // avoid. Typing "me" still correctly triggers the identity question
+      // ("I don't know who you are yet — what's your name?") exactly as before.
+      case "operator": return {text:E.operator};
       case "yield": return {text:E.yield,chips:["7.2 t/ha","9 t/ha"]};
       case "moisture": return {text:E.moisture,chips:["13%","18%"]};
       case "note": return {text:E.note};
@@ -2492,9 +2550,42 @@ async function turn(text){
     (awaiting || Object.values(S.slots).some(sl=>sl.status==="filled"||(Array.isArray(sl.value)&&sl.value.length)));
   let chatWantsLog=false;
   if(rt.intent==="chitchat" || rt.intent==="question"){
-    // The Web Search agent gets first refusal on anything that looks like it
-    // needs live/current info — but ONLY if the worker has left it enabled.
-    // Disabled means disabled: the router never even asks the question.
+    // Weather gets first refusal, ahead of Web Search: it's a real, free,
+    // keyless, already-integrated data source (Open-Meteo, same one the
+    // review card uses) — no reason to spend a Web Search call, or fall
+    // through to Chat's honest "I don't have live data" degradation, when the
+    // answer is one fetch away. Needs a resolved field to fetch coordinates
+    // for; if none is established yet, ask rather than guess — same rule
+    // identity and every other slot already follows.
+    if(needsWeather(text) && NET!=="offline" && !KILL){
+      const fld=S.slots.field.value;
+      if(fld){
+        pipe("weather","run");
+        const wx=await groundWeather(fld.id);
+        span("invoke_agent",{"agent.id":"weather","weather.ok":!!wx},0,"P");
+        pipe("weather","done"); hideTyping();
+        if(wx){ GROUNDED[fld.id]=wx;
+          const back = inFlow ? phrase(nextDirective(S),S) : {text:""};
+          // B() escapes its own argument internally — the outer template must
+          // NOT also go through esc(), or its <b> tags get escaped into
+          // literal text instead of rendering (same rule the amend/submit
+          // success messages already follow correctly, elsewhere in this file).
+          emit("AGENT_UTTERANCE",{ack:`${B(fld.name)}: ${wx.windKph} km/h wind, ${wx.tempC}°C, ${wx.humidity}% humidity — live from ${wx.source}.`,
+            text:back.kind==="review"?"":(back.text||""),kind:back.kind==="review"?"say":(back.kind||"say"),
+            src:"weather:open-meteo",ms:Math.round(performance.now()-t0),cost});
+          S=fold(); setChips(back.chips||[]); busy=false; render(); scrollLog(); return;
+        }
+        // Provider unreachable — fall through to Chat, honestly flagged, same as a degraded Web Search.
+      } else {
+        hideTyping();
+        emit("AGENT_UTTERANCE",{ack:null,text:"Which field? I can pull live conditions for it.",kind:"say",src:"kernel",ms:0,cost});
+        S=fold(); setChips(MIRROR.fields.slice(0,4).map(f=>f.name)); busy=false; render(); scrollLog(); return;
+      }
+    } else if(needsWeather(text)) pipe("weather","skip");
+
+    // The Web Search agent gets first refusal on anything ELSE that looks
+    // like it needs live/current info — but ONLY if the worker has left it
+    // enabled. Disabled means disabled: the router never even asks the question.
     const wantsLive = AgentWebSearch.needs(text);
     if(wantsLive && AgentWebSearch.enabled() && !cbOpen("websearch")){
       pipe("websearch","run");
@@ -2552,10 +2643,22 @@ async function turn(text){
   /* ⑤ INTENT — the Planner decides WHAT this is before we extract. The worker
      never picked a category; the agent infers it from what they said, locks it
      for the session, and re-plans the elicitation. This is what makes the
-     Planner honest: it now classifies AND plans. */
-  if(!SCHEMA_LOCKED && (rt.intent==="provide"||rt.intent==="correct"||chatWantsLog)){
+     Planner honest: it now classifies AND plans.
+     Re-run even once SCHEMA_LOCKED — not just on the first message. A worker
+     mid-spraying-flow who says "actually I did fertiliser today" is reporting
+     a DIFFERENT work order, not answering the spraying question we last asked;
+     without this, the kernel kept walking the OLD schema's slots and asked a
+     spraying question about a fertilising job. classifyWorkOrder's keyword
+     lists are narrow category words (fertilis/nitrogen/spray/harvest…), not
+     everyday vocabulary, so an ordinary slot answer essentially never collides
+     with them — and it's the SAME deterministic classifier every other branch
+     already trusts, never a fresh guess, so this stays exactly as rule-based
+     and auditable as the very first classification. */
+  const type0=(rt.intent==="provide"||rt.intent==="correct"||chatWantsLog) ? AgentPlanner.classify(text) : null;
+  const switching = SCHEMA_LOCKED && type0 && type0!==SCHEMA.type;
+  if((!SCHEMA_LOCKED && (rt.intent==="provide"||rt.intent==="correct"||chatWantsLog)) || switching){
     pipe("kernel","run");
-    const type=AgentPlanner.classify(text);
+    const type=type0;
     // Unconditional, not just "if the type changed": we're inside !SCHEMA_LOCKED,
     // so this is always a FRESH lock-in — including re-describing work after a
     // CANCEL, which leaves phase="cancelled" and old slots sitting in state.
@@ -2564,6 +2667,9 @@ async function turn(text){
     // kind of work order (the common case — SPRAYING is the default) left
     // nextDirective() permanently short-circuited to CANCELLED: the record kept
     // committing behind the scenes while the UI insisted nothing was written.
+    // (When `switching` is what got us here, `type` is guaranteed truthy, so
+    // the "not recognisable" branch below is unreachable for a schema switch —
+    // it only ever fires on the original first-message path.)
     if(type){ SCHEMA=SCHEMAS[type]; emit("SCHEMA_CHANGED",{type}); S=fold(); PLAN=await AgentPlanner.run(); SCHEMA_LOCKED=true; }
     else {
       // Not a recognisable work order — treat it as conversation rather than
@@ -2576,7 +2682,7 @@ async function turn(text){
       emit("AGENT_UTTERANCE",{ack:null,text:esc(a.answer)+citeFooter(a),kind:"say",src:a.by,ms:Math.round(performance.now()-t0),cost});
       S=fold(); setChips([]); busy=false; render(); scrollLog(); return;
     }
-    span("invoke_agent",{"agent.id":"planner","planner.intent":SCHEMA.type,"planner.locked":SCHEMA_LOCKED},0,"P");
+    span("invoke_agent",{"agent.id":"planner","planner.intent":SCHEMA.type,"planner.locked":SCHEMA_LOCKED,"planner.switched":switching},0,"P");
     pipe("kernel","done");
   }
   // A one-word category answer to the question above locks the schema.
@@ -2786,7 +2892,7 @@ const $=s=>document.querySelector(s);
 const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const NODES_Q=[["screen","Screen","screen"],["router","Router","router"],["chat","Chat","chat"],["normalizer","Normalizer","normalizer"],
   ["extractor","Extractor","extractor"],["critic","QA Critic","critic"],["advisor","Advisor","advisor"],["websearch","Web Search","websearch"]];
-const NODES_P=[["verifier","Verifier","—  pure fns"],["foresight","Foresight","—  reads memory"],["kernel","Policy","—  deterministic"]];
+const NODES_P=[["verifier","Verifier","—  pure fns"],["foresight","Foresight","—  reads memory"],["weather","Weather","—  live, keyless"],["kernel","Policy","—  deterministic"]];
 
 function renderPipe(){
   renderReceipt();

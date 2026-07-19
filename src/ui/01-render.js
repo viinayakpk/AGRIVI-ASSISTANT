@@ -7,7 +7,7 @@ const $=s=>document.querySelector(s);
 const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const NODES_Q=[["screen","Screen","screen"],["router","Router","router"],["chat","Chat","chat"],["normalizer","Normalizer","normalizer"],
   ["extractor","Extractor","extractor"],["critic","QA Critic","critic"],["advisor","Advisor","advisor"],["websearch","Web Search","websearch"]];
-const NODES_P=[["verifier","Verifier","—  pure fns"],["foresight","Foresight","—  reads memory"],["kernel","Policy","—  deterministic"]];
+const NODES_P=[["verifier","Verifier","—  pure fns"],["foresight","Foresight","—  reads memory"],["weather","Weather","—  live, keyless"],["kernel","Policy","—  deterministic"]];
 
 function renderPipe(){
   renderReceipt();
