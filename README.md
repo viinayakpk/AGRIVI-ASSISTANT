@@ -279,6 +279,20 @@ Every one of these is the architecture's own claim failing inside the *determini
 
 ---
 
+## Limitations — no backend, by design
+
+The brief is explicit that this doesn't need one: *"Simulates submission, a printed output or local log is sufficient."* Everything below follows directly from honouring that — a single HTML file with no server and no real database — not from cutting a corner. Naming the actual consequences, rather than leaving them implicit:
+
+- **The "server" is a simulation, not a database.** `agriviWrite()` writes into an in-memory `Map` inside the browser tab. There is no real AGRIVI 360 on the other end; nothing here would survive closing the tab at all if the conversation log itself weren't separately mirrored to `localStorage`.
+- **The idempotency dedupe table doesn't survive a reload.** The outbox's own "have I seen this key before" memory (`SEEN`, in `12-outbox.js`) is a plain in-memory `Map`, not persisted — so the retry-dedupe guarantee the architecture doc's own failure mode demonstrates holds within one page session, not across a real restart. A production backend would hold this server-side, durably, which is also where it belongs: **"server-side dedupe is assumed authoritative"** (above) is doing real work as a stated assumption, not a formality.
+- **Memory and recall are scoped to one conversation, not the farm.** The temporal memory graph that lets the assistant answer "what did I spray on the north vineyard" only knows about records submitted in the *current* session. There's no shared, durable, cross-device store that a real farm's workers would all be writing into and reading from — because there's no database for one to live in.
+- **No multi-user consistency.** Two workers, two devices, or the same worker in two tabs are three independent, unsynchronised copies of the world. A real deployment needs one shared source of truth every device reads and writes against; a file opened directly in a browser structurally can't be that.
+- **Tenant data is a hardcoded snapshot, not a live read.** `DEFAULT_TENANT` (fields, products, operators) is baked into the JS at build time. `loadTenant()` is the seam a real integration would use to pull this from AGRIVI's actual database instead — proven to work with a completely different tenant's data, but nothing here does that pull automatically, because there's no live database to pull from.
+
+None of this needed solving for what was asked — a working, honest simulation was the point — but it's worth being explicit about which parts of "production-ready" are genuinely demonstrated here (validation, recovery, confirmation, the reducer) versus which are architecturally impossible without a backend this deliverable was never meant to have.
+
+---
+
 ## Future work
 
 Roughly the order I'd actually build these:
