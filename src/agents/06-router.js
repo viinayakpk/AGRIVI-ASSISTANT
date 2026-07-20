@@ -39,9 +39,18 @@ const AgentRouter = {
     const inReview=st&&st.phase==="review";
     const CONFIRM_RE=/(yes|yep|yeah|yea|yup|sure|ok|okay|correct|confirm|da|submit|send|looks good|sounds good|go ahead|that s right|perfect|great)/;
     const REJECT_RE=/(no|nope|nah|wrong|not right|not quite|incorrect|ne|change|fix|edit)/;
-    if(inReview ? new RegExp("^"+CONFIRM_RE.source).test(t) : new RegExp("^"+CONFIRM_RE.source+"$").test(t))
+    // In review, "yes but change the date" / "yes, except the dose was wrong"
+    // still opens with a confirm word — a PREFIX match alone would submit()
+    // immediately (kernel.js never looks past the intent) and silently ship
+    // the record with the correction that was just stated never read. Any
+    // "but"/"except"/"however", or a comma followed by a revision verb,
+    // means this is a correction wearing a confirm word as its opener, not
+    // an actual confirmation — route it to reject so the worker is asked
+    // what to change instead of having it discarded.
+    const carriesCorrection=inReview && /\b(but|except|however|actually|instead|wait|change|fix)\b/.test(t);
+    if(!carriesCorrection && (inReview ? new RegExp("^"+CONFIRM_RE.source).test(t) : new RegExp("^"+CONFIRM_RE.source+"$").test(t)))
       return {intent:"confirm",messy:false,needs_normalizer:false,by:"heuristic",cost:0};
-    if(inReview ? new RegExp("^"+REJECT_RE.source).test(t) : new RegExp("^"+REJECT_RE.source+"$").test(t))
+    if(carriesCorrection || (inReview ? new RegExp("^"+REJECT_RE.source).test(t) : new RegExp("^"+REJECT_RE.source+"$").test(t)))
       return {intent:"reject",messy:false,needs_normalizer:false,by:"heuristic",cost:0};
     if(/\b(cancel|abort|discard|start over|never ?mind|forget it|nvm)\b/.test(t))
       return {intent:"cancel",messy:false,needs_normalizer:false,by:"heuristic",cost:0};
@@ -104,7 +113,7 @@ const AgentRouter = {
         case "dose": return /\d/.test(t) || /\bhalf\b/.test(t);
         case "yield": case "moisture": return /\d/.test(t);
         case "date": return !!resolveDateExpr(text) || /\d/.test(t) || /\b(today|yesterday|morning|afternoon|tonight|monday|tuesday|wednesday|thursday|friday|saturday|sunday|ago)\b/.test(t);
-        case "operator": return /\b(me|i|myself)\b/.test(t) || match(text,MIRROR.operators,o=>o.name).some(m=>m.score>=0.3);
+        case "operator": return /\b(me|i|myself|self)\b/.test(t) || match(text,MIRROR.operators,o=>o.name).some(m=>m.score>=0.3);
         default: return true;
       } })();
     if(awaiting && (!endsInQ || wc<=2) && text.trim().length<60 && plausible)

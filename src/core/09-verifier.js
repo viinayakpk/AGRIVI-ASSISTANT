@@ -72,7 +72,7 @@ function verify(P){
   if(P.operator_text){
     const st=fold(), onDate=st.slots.date.status==="filled"?st.slots.date.value.iso:todayISO();
     const answeringIdentity=st.rejections.some(x=>x.slot==="operator"&&x.code==="IDENTITY_UNKNOWN");
-    const r=callTool("resolve_operator",{text:P.operator_text,onDate,answeringIdentity,knownIdentity:st.identity});
+    const r=callTool("resolve_operator",{text:P.operator_text,onDate,answeringIdentity,knownIdentity:st.identity,selfIntro:!!P.operator_self_intro});
     if(r.verdict==="OK"){ const o=operator(r.operatorId);
       emit("SLOT_COMMITTED",{slot:"operator",raw:P.operator_text,cap:cap("resolve_operator"),
         value:{id:o.id,name:o.name,licenceNo:o.licenceNo,licenceExpiry:o.licenceExpiry}});

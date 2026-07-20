@@ -1,7 +1,7 @@
 // core/03-matching.js
 // §2 — fuzzy matching primitives + work-order classification.
 
-/* ───────── §2  MATCHING (v1, 36 tests green) ───────── */
+/* ───────── §2  MATCHING (v1, kept) ───────── */
 const norm=s=>(s||"").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g,"")
   .replace(/[^a-z0-9\s.]/g," ").replace(/\s+/g," ").trim();
 const tokens=s=>norm(s).split(" ").filter(Boolean);
@@ -54,7 +54,14 @@ function resolveDateExpr(text){
   if(!text) return null;
   if(/^\d{4}-\d{2}-\d{2}$/.test(text)) return text;
   const t=norm(text);
-  if(/\b(today|this morning|this afternoon|tonight|just now|danas)\b/.test(t)) return todayISO();
+  // A correction or negated mention ("it wasn't today, it was yesterday",
+  // "make that yesterday, not today") must not resolve to "today" just
+  // because that check runs first — a negation word ahead of "today" means
+  // today is being RULED OUT, not stated, so skip it and let yesterday (or
+  // whatever else is actually said) win instead of silently overriding a
+  // worker's own correction with the wrong date.
+  const negatedToday=/\b(not|wasn t|isn t|never|no)\b[^.]{0,20}\btoday\b/.test(t);
+  if(!negatedToday && /\b(today|this morning|this afternoon|tonight|just now|danas)\b/.test(t)) return todayISO();
   if(/\b(yesterday|last night|jucer)\b/.test(t)) return shiftISO(-1);
   const daysAgo=t.match(/\b(\d+)\s*days?\s*ago\b/);
   if(daysAgo) return shiftISO(-parseInt(daysAgo[1],10));

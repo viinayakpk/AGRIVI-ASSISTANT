@@ -67,7 +67,7 @@ function normalizeProposal(i){
     yield_value:i.yield_value??null, moisture_value:i.moisture_value??null, note_text:i.note_text||null };
 }
 
-/* Deterministic extractor — tier 3. v1's parser, 36 assertions green. */
+/* Deterministic extractor — tier 3. v1's parser, kept as the offline fallback. */
 const LocalExtractor = {
   id:"extractor-local", zone:"Q",
   async run(text,ctx){
@@ -96,7 +96,18 @@ const LocalExtractor = {
       if(ps&&ps.score>=0.55) P.products.push({product_text:ps.span,dose,dose_unit:unit});
     }
     const os=match(text,MIRROR.operators,o=>o.name)[0];
-    if(os&&os.score>=0.62) P.operator_text=os.span;
+    if(os&&os.score>=0.62){ P.operator_text=os.span;
+      // "I'm Marko" explicitly introduces a name — different from a bare
+      // self-reference like "I did it" (which only resolves via an already-
+      // known identity) or naming a coworker ("Marko did it", no identity
+      // implied). The fuzzy match above keeps only the matched name span —
+      // that's correct for resolving WHO, but it silently drops the "I'm"
+      // that's the only signal this was a self-introduction, not a coworker
+      // being named. Without this flag, identity never gets established from
+      // the most natural possible phrasing, and the very next self-reference
+      // ("I sprayed...") wrongly asks "who are you?" one turn after they said.
+      if(/^(i m|im|i am|this is|my name is)\b/.test(t)) P.operator_self_intro=true;
+    }
     if(ctx.awaiting==="yield"&&dose!=null){ P.yield_value=dose; dose=null; }
     if(ctx.awaiting==="moisture"){ const m=t.match(/(\d+(?:[.,]\d+)?)\s*%?/); if(m) P.moisture_value=parseFloat(m[1].replace(",",".")); }
     if(ctx.awaiting==="note"&&text.trim()) P.note_text=text.trim();

@@ -52,7 +52,7 @@ const TOOLS = {
   // `knownIdentity` is passed in explicitly by the caller (from the folded
   // state) rather than read from a closure — this tool stays a pure function
   // of its arguments, like every other tool here, testable in isolation.
-  resolve_operator({text,onDate,answeringIdentity,knownIdentity}){
+  resolve_operator({text,onDate,answeringIdentity,knownIdentity,selfIntro}){
     let q=norm(text);
     // A PATTERN, not an exact-string allowlist — "I did it", "I sprayed it",
     // "it was me" must all be recognised as self-reference. An exact-match
@@ -60,7 +60,12 @@ const TOOLS = {
     // through to fuzzy NAME matching and returned UNKNOWN_OPERATOR instead of
     // asking who "I" is) — same bug class as guessing an identity, just in
     // the other direction: failing to recognise a real self-reference.
-    const selfRef=/^(i|me|myself|self)\b/.test(q) || /\b(it was me|by me)$/.test(q);
+    // selfIntro (set by the extractor from the ORIGINAL text, before it was
+    // trimmed to just the matched name span) means this is "I'm Marko", not
+    // a bare "I did it" — the name is already given right here, so this must
+    // NOT fall into the "ask who you are" branch below, which exists only
+    // for the case where a name genuinely isn't in the message at all.
+    const selfRef=(/^(i|me|myself|self)\b/.test(q) || /\b(it was me|by me)$/.test(q)) && !selfIntro;
     if(selfRef){
       // "I/me" is only meaningful once the worker has told us who they are —
       // never guessed from tenant config. First time, we don't know: ask.
@@ -72,7 +77,7 @@ const TOOLS = {
     if(!top||top.score<0.45) return {verdict:"REJECT",code:"UNKNOWN_OPERATOR",
       detail:`No certified operator named "${text}" on this farm.`,options:MIRROR.operators.map(o=>o.name)};
     const o=top.row;
-    const establishesIdentity = selfRef||!!answeringIdentity;
+    const establishesIdentity = selfRef||selfIntro||!!answeringIdentity;
     if(SCHEMA.productKind==="PPP" && onDate && o.licenceExpiry<onDate)
       return {verdict:"REJECT",code:"LICENCE_EXPIRED",
         detail:`${o.name}'s spray licence ${o.licenceNo} expired ${o.licenceExpiry}, before the application date ${onDate}. This record cannot be certified.`,
