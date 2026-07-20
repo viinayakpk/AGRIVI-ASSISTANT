@@ -58,7 +58,14 @@ const SCHEMAS = {
   }
 };
 let SCHEMA = SCHEMAS.SPRAYING;   // provisional; the agent INFERS the real type from the first utterance
-let SCHEMA_LOCKED = true;         // assignment scope: one focused spraying workflow
+// Both these initial values are placeholders only — applyRecovered() (ui/03-boot.js)
+// overwrites them from the replayed event log before the worker can ever see or
+// interact with them, on every boot and every new session. A fresh session has
+// no SCHEMA_CHANGED event and no filled slots, so it correctly resolves to
+// SCHEMA_LOCKED=false: unlocked, the agent infers spraying/fertilising/harvest/
+// generic from what's actually said, and can re-lock to a different type
+// mid-conversation (11-kernel.js) if what's said clearly changes.
+let SCHEMA_LOCKED = true;
 
 /* SESSION IDENTITY — who is actually talking, established from the
    conversation, never assumed from tenant config. `MIRROR.currentUser` is

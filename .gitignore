@@ -5,6 +5,7 @@ AGRIVI_AI_Engineer_Assignment.pdf
 # AI coding tool configuration (skills/hooks) — local tooling, not the project.
 .agents/
 .codex/
+.claude/
 
 # OS junk
 .DS_Store

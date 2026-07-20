@@ -8,7 +8,7 @@
    THE SHAPE
    ---------
    A deterministic KERNEL owns control flow, state and every write. Around it
-   sit nine SMALL, FOCUSED AGENTS (12-factor #10), each a node in a workflow —
+   sit twelve SMALL, FOCUSED AGENTS (12-factor #10), each a node in a workflow —
    not an autonomous loop. A ROUTER picks how many run per turn, because
    multi-agent costs +58..285% tokens and depth must be earned.
 

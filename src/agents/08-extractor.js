@@ -84,7 +84,17 @@ const LocalExtractor = {
     const dm=t.match(/(\d+(?:[.,]\d+)?)\s*(l|lit(?:re|er)s?|kg|kilos?|g|ml|t|tonnes?)\b\s*(?:\/|per\s+|a\s+)?\s*(ha|hectare)?/);
     if(dm){ dose=parseFloat(dm[1].replace(",",".")); const u=dm[2];
       unit=/^(l|lit)/.test(u)?"L/ha":/^(kg|kilo)/.test(u)?"kg/ha":/^(t|ton)/.test(u)?"t/ha":/^g$/.test(u)?"g/ha":"mL/ha"; }
-    else if(/\bhalf a (lit(re|er))\b/.test(t)){ dose=0.5; unit="L/ha"; }
+    else {
+      // Word-form fractions the numeric regex above can't read: "half a
+      // litre", "a quarter litre", "1 and a half litres"/"kilos" — checked
+      // BEFORE the bare-number fallback below, which would otherwise take
+      // just the leading digit of "1 and a half litres" as dose=1, silently
+      // dropping the ".5" and the unit rather than failing loudly on it.
+      const frac=t.match(/\b(?:(\d+)\s*and\s*a\s*half|half(?:\s*a)?|(?:a\s*)?quarter)\s*(lit(?:re|er)s?|kilos?|kg|l)\b/);
+      if(frac){ const whole=frac[1]?parseInt(frac[1],10):0;
+        dose = /quarter/.test(frac[0]) ? 0.25 : whole+0.5;
+        unit=/^(l|lit)/.test(frac[2])?"L/ha":"kg/ha"; }
+    }
     if(dose==null&&(ctx.awaiting==="dose"||/\b(rate|dose|per ha|per hectare)\b/.test(t))){
       const b=t.match(/(?:^|\s)(\d+(?:[.,]\d+)?)(?:\s|$)/); if(b) dose=parseFloat(b[1].replace(",",".")); }
     P.date_text=resolveDateExpr(text);

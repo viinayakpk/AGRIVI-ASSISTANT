@@ -127,7 +127,7 @@ function renderTrace(){
     resolve_product:["Found the product","Matched against registered products"],
     check_crop_product_compatibility:["Checked crop compatibility","Confirmed the product is allowed"],
     check_dose:["Checked the application rate","Compared with the authorised range"],
-    resolve_operator:["Verified the operator","Checked the farm team and licence"],
+    resolve_operator:["Resolved the operator","Matched against the farm team; checked licence if one's on file"],
     check_date:["Checked the date","Confirmed the logging window"]
   };
   const rows=SPANS.filter(s=>s.turn===turnSeq&&s.attrs&&(s.attrs["agent.id"]||s.attrs["tool.name"]));

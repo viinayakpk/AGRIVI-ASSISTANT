@@ -31,9 +31,9 @@ const MODELS = {
   websearch: "anthropic/claude-haiku-4.5"    // its own agent, its own tier — see AgentWebSearch
 };
 // Maps each agent to the gateway's resilience tier (its own model FALLBACK
-// CHAIN — see gateway/server.js LLM_CHAINS). The gateway ignores which exact
-// model we ask for and walks its chain, so this is "what class of model does
-// this job need", not "call this model or nothing".
+// CHAIN). The gateway ignores which exact model we ask for and walks its
+// chain, so this is "what class of model does this job need", not "call
+// this model or nothing".
 const AGENT_TIER = { screen:"screen-class", router:"router-class", normalizer:"router-class",
   extractor:"extractor-class", planner:"critic-class", critic:"critic-class",
   advisor:"advisor-class", chat:"chat-class", websearch:"websearch-class" };

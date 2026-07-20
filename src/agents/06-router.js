@@ -113,7 +113,18 @@ const AgentRouter = {
         case "dose": return /\d/.test(t) || /\bhalf\b/.test(t);
         case "yield": case "moisture": return /\d/.test(t);
         case "date": return !!resolveDateExpr(text) || /\d/.test(t) || /\b(today|yesterday|morning|afternoon|tonight|monday|tuesday|wednesday|thursday|friday|saturday|sunday|ago)\b/.test(t);
-        case "operator": return /\b(me|i|myself|self)\b/.test(t) || match(text,MIRROR.operators,o=>o.name).some(m=>m.score>=0.3);
+        // Unlike field/product/dose, an operator is NOT restricted to a known
+        // list — resolve_operator itself now accepts any name, uncertified if
+        // it's not on the roster (see 05-tools.js). Gating this on a roster
+        // match would silently defeat that fix for anyone not named Marko,
+        // Ivana or Petar: a real two-or-three-word name a worker actually
+        // gives would score 0 against the fixed roster and never even reach
+        // extraction. A short, name-shaped reply (up to 4 words — covers
+        // "Stjepan Babić", "Dr. Jane Smith") is accepted on its shape alone;
+        // the earlier checks in this function (question openers, weather,
+        // confirm/reject/cancel/chitchat) have already caught the obvious
+        // non-name cases by the time execution reaches here.
+        case "operator": return /\b(me|i|myself|self)\b/.test(t) || wc<=4 || match(text,MIRROR.operators,o=>o.name).some(m=>m.score>=0.3);
         default: return true;
       } })();
     if(awaiting && (!endsInQ || wc<=2) && text.trim().length<60 && plausible)

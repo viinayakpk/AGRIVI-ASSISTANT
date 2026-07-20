@@ -963,7 +963,14 @@ const SCHEMAS = {
   }
 };
 let SCHEMA = SCHEMAS.SPRAYING;   // provisional; the agent INFERS the real type from the first utterance
-let SCHEMA_LOCKED = true;         // assignment scope: one focused spraying workflow
+// Both these initial values are placeholders only — applyRecovered() (ui/03-boot.js)
+// overwrites them from the replayed event log before the worker can ever see or
+// interact with them, on every boot and every new session. A fresh session has
+// no SCHEMA_CHANGED event and no filled slots, so it correctly resolves to
+// SCHEMA_LOCKED=false: unlocked, the agent infers spraying/fertilising/harvest/
+// generic from what's actually said, and can re-lock to a different type
+// mid-conversation (11-kernel.js) if what's said clearly changes.
+let SCHEMA_LOCKED = true;
 
 /* SESSION IDENTITY — who is actually talking, established from the
    conversation, never assumed from tenant config. `MIRROR.currentUser` is
@@ -1809,7 +1816,18 @@ const AgentRouter = {
         case "dose": return /\d/.test(t) || /\bhalf\b/.test(t);
         case "yield": case "moisture": return /\d/.test(t);
         case "date": return !!resolveDateExpr(text) || /\d/.test(t) || /\b(today|yesterday|morning|afternoon|tonight|monday|tuesday|wednesday|thursday|friday|saturday|sunday|ago)\b/.test(t);
-        case "operator": return /\b(me|i|myself|self)\b/.test(t) || match(text,MIRROR.operators,o=>o.name).some(m=>m.score>=0.3);
+        // Unlike field/product/dose, an operator is NOT restricted to a known
+        // list — resolve_operator itself now accepts any name, uncertified if
+        // it's not on the roster (see 05-tools.js). Gating this on a roster
+        // match would silently defeat that fix for anyone not named Marko,
+        // Ivana or Petar: a real two-or-three-word name a worker actually
+        // gives would score 0 against the fixed roster and never even reach
+        // extraction. A short, name-shaped reply (up to 4 words — covers
+        // "Stjepan Babić", "Dr. Jane Smith") is accepted on its shape alone;
+        // the earlier checks in this function (question openers, weather,
+        // confirm/reject/cancel/chitchat) have already caught the obvious
+        // non-name cases by the time execution reaches here.
+        case "operator": return /\b(me|i|myself|self)\b/.test(t) || wc<=4 || match(text,MIRROR.operators,o=>o.name).some(m=>m.score>=0.3);
         default: return true;
       } })();
     if(awaiting && (!endsInQ || wc<=2) && text.trim().length<60 && plausible)
@@ -1957,7 +1975,17 @@ const LocalExtractor = {
     const dm=t.match(/(\d+(?:[.,]\d+)?)\s*(l|lit(?:re|er)s?|kg|kilos?|g|ml|t|tonnes?)\b\s*(?:\/|per\s+|a\s+)?\s*(ha|hectare)?/);
     if(dm){ dose=parseFloat(dm[1].replace(",",".")); const u=dm[2];
       unit=/^(l|lit)/.test(u)?"L/ha":/^(kg|kilo)/.test(u)?"kg/ha":/^(t|ton)/.test(u)?"t/ha":/^g$/.test(u)?"g/ha":"mL/ha"; }
-    else if(/\bhalf a (lit(re|er))\b/.test(t)){ dose=0.5; unit="L/ha"; }
+    else {
+      // Word-form fractions the numeric regex above can't read: "half a
+      // litre", "a quarter litre", "1 and a half litres"/"kilos" — checked
+      // BEFORE the bare-number fallback below, which would otherwise take
+      // just the leading digit of "1 and a half litres" as dose=1, silently
+      // dropping the ".5" and the unit rather than failing loudly on it.
+      const frac=t.match(/\b(?:(\d+)\s*and\s*a\s*half|half(?:\s*a)?|(?:a\s*)?quarter)\s*(lit(?:re|er)s?|kilos?|kg|l)\b/);
+      if(frac){ const whole=frac[1]?parseInt(frac[1],10):0;
+        dose = /quarter/.test(frac[0]) ? 0.25 : whole+0.5;
+        unit=/^(l|lit)/.test(frac[2])?"L/ha":"kg/ha"; }
+    }
     if(dose==null&&(ctx.awaiting==="dose"||/\b(rate|dose|per ha|per hectare)\b/.test(t))){
       const b=t.match(/(?:^|\s)(\d+(?:[.,]\d+)?)(?:\s|$)/); if(b) dose=parseFloat(b[1].replace(",",".")); }
     P.date_text=resolveDateExpr(text);
@@ -2958,6 +2986,13 @@ function startAmend(serverId){
   if(!orig) return false;
   emit("AMEND_STARTED",{amendsId:serverId});
   S=fold();
+  // Stay on the current schema for the correction — submit() just unlocked
+  // it so a FRESH message can start a different work order, but a correction
+  // ("the dose was actually 0.6") often has no category keyword of its own
+  // and must not be forced through re-classification, which could fail to
+  // recognise it and drop into a plain chat reply instead of continuing
+  // the collect flow.
+  SCHEMA_LOCKED=true;
   say({text:`What needs to change on ${B(serverId)}? Describe the correction and I'll walk through it again.`});
   return true;
 }
@@ -2998,6 +3033,16 @@ async function drain(key){
       emit("OUTBOX_SYNCED",{key,serverId:r.serverId,deduped:r.deduped});
       emit("SERVER_RECORD_COMMITTED",{record:{...it.record,serverId:r.serverId,committedAt:Date.now()}});
       emit("PHASE_CHANGED",{phase:"done"}); S=fold();
+      // Unlock for the next thing the worker says — same reasoning as CANCEL
+      // (11-kernel.js): nextDirective() always returns DONE once phase is
+      // "done", with nothing to move it back to "collecting" for a plain
+      // follow-up message. Without this, a worker logging several jobs in
+      // one sitting is stuck after the first: every later message still
+      // extracts and silently commits slots (products merge into the
+      // now-stale array), but the reply is always just "Logged. Anything
+      // else?" with no way to review or submit the second job. startAmend()
+      // explicitly re-locks for its own flow, so this doesn't fight amending.
+      SCHEMA_LOCKED=false;
       consolidate(it.record);   // slow process: fold the new record into temporal memory
       say({text: r.deduped
           ? `Confirmed as ${B(r.serverId)}. AGRIVI matched the retry to the original record, so no duplicate was created.`
@@ -3149,7 +3194,7 @@ function renderTrace(){
     resolve_product:["Found the product","Matched against registered products"],
     check_crop_product_compatibility:["Checked crop compatibility","Confirmed the product is allowed"],
     check_dose:["Checked the application rate","Compared with the authorised range"],
-    resolve_operator:["Verified the operator","Checked the farm team and licence"],
+    resolve_operator:["Resolved the operator","Matched against the farm team; checked licence if one's on file"],
     check_date:["Checked the date","Confirmed the logging window"]
   };
   const rows=SPANS.filter(s=>s.turn===turnSeq&&s.attrs&&(s.attrs["agent.id"]||s.attrs["tool.name"]));

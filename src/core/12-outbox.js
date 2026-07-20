@@ -47,6 +47,13 @@ function startAmend(serverId){
   if(!orig) return false;
   emit("AMEND_STARTED",{amendsId:serverId});
   S=fold();
+  // Stay on the current schema for the correction — submit() just unlocked
+  // it so a FRESH message can start a different work order, but a correction
+  // ("the dose was actually 0.6") often has no category keyword of its own
+  // and must not be forced through re-classification, which could fail to
+  // recognise it and drop into a plain chat reply instead of continuing
+  // the collect flow.
+  SCHEMA_LOCKED=true;
   say({text:`What needs to change on ${B(serverId)}? Describe the correction and I'll walk through it again.`});
   return true;
 }
@@ -87,6 +94,16 @@ async function drain(key){
       emit("OUTBOX_SYNCED",{key,serverId:r.serverId,deduped:r.deduped});
       emit("SERVER_RECORD_COMMITTED",{record:{...it.record,serverId:r.serverId,committedAt:Date.now()}});
       emit("PHASE_CHANGED",{phase:"done"}); S=fold();
+      // Unlock for the next thing the worker says — same reasoning as CANCEL
+      // (11-kernel.js): nextDirective() always returns DONE once phase is
+      // "done", with nothing to move it back to "collecting" for a plain
+      // follow-up message. Without this, a worker logging several jobs in
+      // one sitting is stuck after the first: every later message still
+      // extracts and silently commits slots (products merge into the
+      // now-stale array), but the reply is always just "Logged. Anything
+      // else?" with no way to review or submit the second job. startAmend()
+      // explicitly re-locks for its own flow, so this doesn't fight amending.
+      SCHEMA_LOCKED=false;
       consolidate(it.record);   // slow process: fold the new record into temporal memory
       say({text: r.deduped
           ? `Confirmed as ${B(r.serverId)}. AGRIVI matched the retry to the original record, so no duplicate was created.`

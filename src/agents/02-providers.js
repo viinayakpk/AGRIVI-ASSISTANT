@@ -18,9 +18,8 @@ const hasKey=()=>!!sessionStorage.getItem("agrivi.or.key");
 
 /* Two paths, same contract — this is the plug-and-play seam for the LLM leg:
      served over http(s) → the resilient GATEWAY (/api/llm): key stays server-
-       side, gateway walks a per-tier model FALLBACK CHAIN (see
-       gateway/server.js), so one provider/model failing auto-switches — the
-       caller never sees it.
+       side, gateway walks a per-tier model FALLBACK CHAIN, so one
+       provider/model failing auto-switches — the caller never sees it.
      opened as file://                → direct-to-OpenRouter demo fallback
        (client-side key), same request/response shape, no gateway available.
    `opts.webSearch` attaches OpenRouter's native web-search plugin
