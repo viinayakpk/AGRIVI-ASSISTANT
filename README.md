@@ -2,13 +2,15 @@
 
 A schema-driven, multi-agent conversational agent that lets a field worker log a work order by talking. It validates every input against AGRIVI master data, defends itself against prompt injection, reviews the record before submitting, and **keeps working with no signal at all**.
 
+> The brief asks for a **single HTML file that opens and works immediately** — so everything here is deliberately scoped to run client-side with no backend. The depth that would normally live server-side (a real database, durable cross-device state, a live AGRIVI 360 write API) is instead demonstrated as honest in-browser simulations behind clean seams; where a backend would change the design, that's called out rather than faked. See [Limitations — no backend, by design](#limitations--no-backend-by-design).
+
 | | |
 |---|---|
-| **Implementation** | [`dist/agrivi-companion.html`](dist/agrivi-companion.html) — the single file to open/submit. Built from [`src/`](src/) by `node build.js` (plain concatenation, zero dependencies, no bundler) |
-| **Architecture** | [`docs/ARCHITECTURE-v2.md`](docs/ARCHITECTURE-v2.md) — trust zones, agent contracts, rails, model tiering |
-| **Platform hardening** | [`docs/PLATFORM-ARCHITECTURE.md`](docs/PLATFORM-ARCHITECTURE.md) — tenant seam, MCP, session identity, cost/guardrails research |
-| **Brief's 1-pager** | [`ARCHITECTURE.md`](ARCHITECTURE.md) — state management, tool design, one failure mode |
-| **Provider** | OpenRouter (`POST /api/v1/chat/completions`), called directly from the browser with a key you paste in — no server |
+| **① Architecture document** *(the brief's Part 1)* | [`ARCHITECTURE.md`](ARCHITECTURE.md) — the one-page answer: state management, tool design, one failure mode |
+| **② Implementation** *(the brief's Part 2)* | [`dist/agrivi-companion.html`](dist/agrivi-companion.html) — the single file to open/submit. Built from [`src/`](src/) by `node build.js` (plain concatenation, zero dependencies, no bundler) |
+| *Supplementary — deep-dive* | [`docs/ARCHITECTURE-v2.md`](docs/ARCHITECTURE-v2.md) — trust zones, agent contracts, rails, model tiering |
+| *Supplementary — platform hardening* | [`docs/PLATFORM-ARCHITECTURE.md`](docs/PLATFORM-ARCHITECTURE.md) — tenant seam, MCP, session identity, cost/guardrails research |
+| **Provider** | OpenRouter (`POST /api/v1/chat/completions`), called directly from the browser with a key you paste in — no server. Every proposer call uses **strict JSON-schema-constrained output** (`response_format: json_schema, strict:true`), not prompt-coaxed JSON |
 | **Models** | 12 agents, independently tiered, with prompt caching + a semantic response cache to cut repeat-call cost — see below |
 | **On-device** | Chrome Prompt API (Gemini Nano), JSON-schema constrained |
 
@@ -270,6 +272,19 @@ Every one of these is the architecture's own claim failing inside the *determini
 **Crop is derived, never asked.** A crop is assigned to the block for the season, so `resolve_field` returns it and one required slot disappears. An explicitly contradicting crop is `CROP_CONFLICT` — a real data problem to surface, not a slot to overwrite.
 
 **Products are registered, with legally load-bearing fields.** `{kind, authNo, actives, approvedCrops, doseMin, doseMax, unit, phiDays, reEntryH}`. Under Reg. (EU) 1107/2009 Art. 67 and Reg. (EU) 2023/564, a professional user must record product name **and authorisation number**, date, dose, treated area and crop — electronically, producible on demand. Hence: label rates are **legal limits** (`DOSE_OUT_OF_RANGE`); crop↔product compatibility is an **MRL question**; the 30-day record window is enforced; and **duplicates are worse than omissions**, which is the whole idempotency design.
+
+**Why spraying, and why every mandatory field is captured.** From 1 Jan 2026, Reg. (EU) 2023/564 requires spray records to be *electronic and machine-readable* — so a conversational logger for the most heavily-regulated operation is the compliance case, not a convenience. The collected slots map 1:1 onto the mandatory record:
+
+| EU 2023/564 mandatory field | Captured as | Validated by |
+|---|---|---|
+| Product name **+ authorisation number** | `product` → resolved PPP `{name, authNo}` | `resolve_product` |
+| Dosage / rate | `dose` (+ unit) | `check_dose` against label `doseMin–doseMax` |
+| Crop treated | derived from block (not asked) | `resolve_field` → season crop |
+| Treated area | `Field.areaHa` of the resolved block | `resolve_field` |
+| Date of application | `date` | `check_date` (30-day window, licence-on-date) |
+| Operator | `operator` (+ licence check when PPP-bearing) | `resolve_operator` |
+
+Nothing reaches the review card until each of these resolves against the mirror — so the "structured confirmation" the brief asks for is also, by construction, a compliance-complete record.
 
 **Operators are certified — conditionally.** The licence is checked **against the application date**, not today (back-dating must not launder an expired certification) — and **only when the schema is PPP-bearing**. Fertilising and harvest require no spray licence. The schema drives the rule. A name not on the tenant's roster is still accepted and logged, flagged uncertified rather than rejected — a closed operator list was never a required check, only the licence question is.
 
