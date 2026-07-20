@@ -112,7 +112,7 @@ async function turn(text){
         // Provider unreachable — fall through to Chat, honestly flagged, same as a degraded Web Search.
       } else {
         hideTyping();
-        emit("AGENT_UTTERANCE",{ack:null,text:"Which field? I can pull live conditions for it.",kind:"say",src:"kernel",ms:0,cost});
+        emit("AGENT_UTTERANCE",{ack:null,text:"I can only check live conditions for one of your own fields, not a general location. Which field?",kind:"say",src:"kernel",ms:0,cost});
         S=fold(); setChips(MIRROR.fields.slice(0,4).map(f=>f.name)); busy=false; render(); scrollLog(); return;
       }
     } else if(needsWeather(text)) pipe("weather","skip");

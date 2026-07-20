@@ -38,6 +38,16 @@ const AgentRouter = {
     // even mid-flow ("what fields do I have?" while awaiting a field answer).
     if(/^(what|whats|what's|how|when|can i|is it|why|who|do you|are you|tell me)\b/.test(t))
       return {intent:"question",messy:false,needs_normalizer:false,by:"heuristic",cost:0};
+    // A live-data question can be phrased without "?" or a recognised opener
+    // ("weather in germany now" instead of "what's the weather..."), and the
+    // awaiting fast-path below would otherwise swallow it as the answer to
+    // whatever slot is being asked about — no field/product/dose/date/operator
+    // answer is ever going to contain a weather word, so this is safe ahead of
+    // it. Excluded only for the note slot, the one place a worker legitimately
+    // describes conditions as free text ("windy, sprayed anyway") rather than
+    // asking about them.
+    if(needsWeather(text) && awaiting!=="note")
+      return {intent:"question",messy:false,needs_normalizer:false,by:"heuristic",cost:0};
     // The kernel is actively waiting on a specific slot (mid-work-order) and
     // this doesn't open like a question — that's a direct answer, not a topic
     // switch. This was the actual bug behind "I answered with a field name
