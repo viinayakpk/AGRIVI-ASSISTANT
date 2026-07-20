@@ -16,7 +16,22 @@
    kernel decides whether this turn is ALLOWED to leave the farm's data, then
    the call is made with OpenRouter's native web-search plugin attached. */
 const LIVE_INFO_RE=/\b(price|prices|trading at|market rate|news|latest|current(ly)?|today'?s|this week'?s|recall|outbreak|banned?|regulat|announc|forecast for|weather (in|near)|what'?s happening)\b/i;
-function needsWebSearch(text){ return LIVE_INFO_RE.test(text) && !/\b(phi|pre-harvest|re-?entry|dose|rate|licence|license)\b/i.test(text); }
+// "current price of nitrogen fertilizer" and "current price of Bitcoin" match
+// LIVE_INFO_RE identically — needing live info doesn't mean needing THIS
+// farm's live info. Web Search is the one agent allowed to leave the farm's
+// own data, so it should only fire when the question is actually about this
+// tenant's own products/crops/fields/farm vocabulary, not any live topic.
+// Built from MIRROR so it stays tenant-agnostic — swapping tenants changes
+// what counts as relevant with zero code change, same as everything else
+// that reads MIRROR.
+const FARM_TERMS_RE=/\b(spray|fertil|harvest|pest|disease|blight|weed|crop|field|yield|nitrogen|fungicide|herbicide|insecticide|product|drift|moisture|farm)\b/i;
+function isFarmRelevant(text){
+  const t=norm(text);
+  if(FARM_TERMS_RE.test(t)) return true;
+  const names=[...MIRROR.products,...MIRROR.crops,...MIRROR.fields].flatMap(x=>[x.name,...(x.aliases||[])]);
+  return names.some(n=>t.includes(norm(n)));
+}
+function needsWebSearch(text){ return LIVE_INFO_RE.test(text) && isFarmRelevant(text) && !/\b(phi|pre-harvest|re-?entry|dose|rate|licence|license)\b/i.test(text); }
 const CHAT_SCHEMA={type:"object",properties:{answer:{type:"string"},
   wants_to_log:{type:"boolean"}},required:["answer","wants_to_log"],additionalProperties:false};
 const AgentChat = {
@@ -51,6 +66,7 @@ const AgentChat = {
 You do not know the worker's name unless they have told you in this conversation${st.identity?` — this one has: ${operator(st.identity).name}`:" — this one hasn't, so do not address them by any name or guess one"}.
 You can: log work orders (spraying, fertilising, harvest, or any task), answer questions about products and fields, and recall past work from memory. Keep replies to 1-3 sentences, no preamble.
 If the worker is starting to describe actual field work they did, set wants_to_log true so the system can capture it properly; otherwise false. Never invent a product rate, authorisation number, or a past record — only use the data below.
+If the question has nothing to do with this farm, its fields/products, or work-order logging (general knowledge, trivia, unrelated topics), do NOT answer it — say plainly that you can only help with field work here, and ask what they need for the farm instead. Do not supply the actual fact even briefly before redirecting.
 
 FIELDS: ${MIRROR.fields.map(f=>`${f.name} (${f.block}, ${f.areaHa}ha, ${crop(f.cropId).name})`).join("; ")}
 PRODUCTS:\n${facts}`;

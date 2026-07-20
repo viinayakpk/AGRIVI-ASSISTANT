@@ -1700,9 +1700,22 @@ const AgentRouter = {
     // "that s" (three tokens), not "thats" — so "that s right" is what
     // actually needs matching here, not the apostrophe'd or naively-squashed
     // forms either one of which silently never matches.
-    if(/^(yes|yep|yeah|yea|yup|sure|ok|okay|correct|confirm|da|submit|send|looks good|sounds good|go ahead|that s right|perfect|great)\b/.test(t))
+    // "yes"/"no" only MEAN confirm/reject when a review is actually pending —
+    // anywhere else they're ordinary words that happen to start a real
+    // sentence ("yes I need to know what kind of grape it is"). Matching just
+    // the PREFIX outside a review turned every such sentence into a silent
+    // "confirm" that nothing downstream handles, so it fell through unrouted
+    // all the way to extraction and produced an unrelated canned question.
+    // In review, stay lenient (prefix match — "yes that's right" should work
+    // without the whole phrase matching exactly); anywhere else, require the
+    // WHOLE message to be just the affirmation/negation, not merely start
+    // with one.
+    const inReview=st&&st.phase==="review";
+    const CONFIRM_RE=/(yes|yep|yeah|yea|yup|sure|ok|okay|correct|confirm|da|submit|send|looks good|sounds good|go ahead|that s right|perfect|great)/;
+    const REJECT_RE=/(no|nope|nah|wrong|not right|not quite|incorrect|ne|change|fix|edit)/;
+    if(inReview ? new RegExp("^"+CONFIRM_RE.source).test(t) : new RegExp("^"+CONFIRM_RE.source+"$").test(t))
       return {intent:"confirm",messy:false,needs_normalizer:false,by:"heuristic",cost:0};
-    if(/^(no|nope|nah|wrong|not right|not quite|incorrect|ne|change|fix|edit)\b/.test(t))
+    if(inReview ? new RegExp("^"+REJECT_RE.source).test(t) : new RegExp("^"+REJECT_RE.source+"$").test(t))
       return {intent:"reject",messy:false,needs_normalizer:false,by:"heuristic",cost:0};
     if(/\b(cancel|abort|discard|start over|never ?mind|forget it|nvm)\b/.test(t))
       return {intent:"cancel",messy:false,needs_normalizer:false,by:"heuristic",cost:0};
@@ -1744,20 +1757,61 @@ const AgentRouter = {
     // being recognised as a question by the fast path meant to catch it.
     const endsInQ=/\?\s*$/.test(text);
     const wc=t.split(" ").filter(Boolean).length;
-    if(awaiting && (!endsInQ || wc<=2) && text.trim().length<60)
+    // "No '?' " is necessary but not sufficient evidence of a real answer —
+    // "lol nice" and "capital of france" also have no "?", and were both
+    // getting swallowed as the answer to whatever slot was pending, then
+    // silently failing extraction and re-asking the same question with no
+    // acknowledgment. A single short word/number is always worth trying
+    // (covers "0.5", "Ivana", "today"); anything longer has to show SOME
+    // resemblance to what's actually being asked for — a fuzzy match against
+    // the real roster for field/product/operator, a digit for dose/yield/
+    // moisture, a date-shaped word for date — using the same matcher the
+    // verifier already trusts, not a fresh guess. Free text (note) and an
+    // unawaited turn are always plausible; nothing here blocks a genuine
+    // (even messy) attempt, it only stops obviously-unrelated text from
+    // being force-fed into extraction.
+    const plausible=(()=>{ if(!awaiting||awaiting==="note") return true;
+      if(wc<=1) return true;
+      switch(awaiting){
+        case "field": return match(text,MIRROR.fields,f=>f.name).some(m=>m.score>=0.3);
+        case "product": return match(text,MIRROR.products.filter(p=>!SCHEMA.productKind||p.kind===SCHEMA.productKind),p=>p.name).some(m=>m.score>=0.3);
+        case "dose": return /\d/.test(t) || /\bhalf\b/.test(t);
+        case "yield": case "moisture": return /\d/.test(t);
+        case "date": return !!resolveDateExpr(text) || /\d/.test(t) || /\b(today|yesterday|morning|afternoon|tonight|monday|tuesday|wednesday|thursday|friday|saturday|sunday|ago)\b/.test(t);
+        case "operator": return /\b(me|i|myself)\b/.test(t) || match(text,MIRROR.operators,o=>o.name).some(m=>m.score>=0.3);
+        default: return true;
+      } })();
+    if(awaiting && (!endsInQ || wc<=2) && text.trim().length<60 && plausible)
       return {intent:"provide",messy:false,needs_normalizer:false,by:"heuristic:awaiting",cost:0};
     if(endsInQ)
       return {intent:"question",messy:false,needs_normalizer:false,by:"heuristic",cost:0};
     const messy = text.length>60 || /\b(uh|um|erm|ovaj)\b/.test(t) || /[čćžšđ]/i.test(text);
     if(!cbOpen("router")){
-      try{ const r=await runQ("router",
+      try{
+        // The deterministic fast paths above already handle the unambiguous
+        // majority; a message that reaches the model is, by construction,
+        // one they couldn't confidently resolve — the model needs to know
+        // WHAT the system just asked to have any chance of doing better,
+        // otherwise it's classifying the words alone, blind to dialogue
+        // state, the same failure the fast paths above just had fixed.
+        const stateHint = inReview ? "The system just showed a review card and is waiting for the worker to confirm or ask for a change."
+          : awaiting ? `The system just asked the worker for their "${awaiting}" and is waiting on that specific answer.`
+          : "No specific answer is pending — this may be the start of a new topic.";
+        const r=await runQ("router",
           `Classify a farm worker's message to a work-order logging agent. Return JSON only.
-intent: what they are doing. messy: true if the text has ASR noise, disfluency, or mixed languages.
+${stateHint}
+intent: "confirm"/"reject" ONLY make sense if a review or a clear yes/no moment is actually pending (see above) — a message that merely starts with "yes"/"no" but continues with unrelated content is "question" or "chitchat", not confirm/reject. "provide" means it's actually answering what's pending; if it isn't, classify what it actually is instead.
+messy: true if the text has ASR noise, disfluency, or mixed languages.
 needs_normalizer: true only if cleaning the text would materially help extraction.`,
           text, ROUTER_SCHEMA);
         cbOk("router"); return {...r.parsed, by:r.model, cost:r.cost};
       }catch(e){ cbFail("router",String(e.message||e)); }
     }
+    // Nothing resolved it — if we know a specific answer was pending and this
+    // clearly isn't it, don't default to "provide" and let it fall silently
+    // into extraction; hand it to Chat instead, same as an unrecognised
+    // question would get.
+    if(awaiting && !plausible) return {intent:"chitchat",messy,needs_normalizer:messy,by:"heuristic",cost:0};
     return {intent:"provide",messy,needs_normalizer:messy,by:"heuristic",cost:0};
   }
 };
@@ -2114,7 +2168,22 @@ function memSummary(text){
    kernel decides whether this turn is ALLOWED to leave the farm's data, then
    the call is made with OpenRouter's native web-search plugin attached. */
 const LIVE_INFO_RE=/\b(price|prices|trading at|market rate|news|latest|current(ly)?|today'?s|this week'?s|recall|outbreak|banned?|regulat|announc|forecast for|weather (in|near)|what'?s happening)\b/i;
-function needsWebSearch(text){ return LIVE_INFO_RE.test(text) && !/\b(phi|pre-harvest|re-?entry|dose|rate|licence|license)\b/i.test(text); }
+// "current price of nitrogen fertilizer" and "current price of Bitcoin" match
+// LIVE_INFO_RE identically — needing live info doesn't mean needing THIS
+// farm's live info. Web Search is the one agent allowed to leave the farm's
+// own data, so it should only fire when the question is actually about this
+// tenant's own products/crops/fields/farm vocabulary, not any live topic.
+// Built from MIRROR so it stays tenant-agnostic — swapping tenants changes
+// what counts as relevant with zero code change, same as everything else
+// that reads MIRROR.
+const FARM_TERMS_RE=/\b(spray|fertil|harvest|pest|disease|blight|weed|crop|field|yield|nitrogen|fungicide|herbicide|insecticide|product|drift|moisture|farm)\b/i;
+function isFarmRelevant(text){
+  const t=norm(text);
+  if(FARM_TERMS_RE.test(t)) return true;
+  const names=[...MIRROR.products,...MIRROR.crops,...MIRROR.fields].flatMap(x=>[x.name,...(x.aliases||[])]);
+  return names.some(n=>t.includes(norm(n)));
+}
+function needsWebSearch(text){ return LIVE_INFO_RE.test(text) && isFarmRelevant(text) && !/\b(phi|pre-harvest|re-?entry|dose|rate|licence|license)\b/i.test(text); }
 const CHAT_SCHEMA={type:"object",properties:{answer:{type:"string"},
   wants_to_log:{type:"boolean"}},required:["answer","wants_to_log"],additionalProperties:false};
 const AgentChat = {
@@ -2149,6 +2218,7 @@ const AgentChat = {
 You do not know the worker's name unless they have told you in this conversation${st.identity?` — this one has: ${operator(st.identity).name}`:" — this one hasn't, so do not address them by any name or guess one"}.
 You can: log work orders (spraying, fertilising, harvest, or any task), answer questions about products and fields, and recall past work from memory. Keep replies to 1-3 sentences, no preamble.
 If the worker is starting to describe actual field work they did, set wants_to_log true so the system can capture it properly; otherwise false. Never invent a product rate, authorisation number, or a past record — only use the data below.
+If the question has nothing to do with this farm, its fields/products, or work-order logging (general knowledge, trivia, unrelated topics), do NOT answer it — say plainly that you can only help with field work here, and ask what they need for the farm instead. Do not supply the actual fact even briefly before redirecting.
 
 FIELDS: ${MIRROR.fields.map(f=>`${f.name} (${f.block}, ${f.areaHa}ha, ${crop(f.cropId).name})`).join("; ")}
 PRODUCTS:\n${facts}`;
