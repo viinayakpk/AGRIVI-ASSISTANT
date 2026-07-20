@@ -73,7 +73,12 @@ function verify(P){
     const st=fold(), onDate=st.slots.date.status==="filled"?st.slots.date.value.iso:todayISO();
     const answeringIdentity=st.rejections.some(x=>x.slot==="operator"&&x.code==="IDENTITY_UNKNOWN");
     const r=callTool("resolve_operator",{text:P.operator_text,onDate,answeringIdentity,knownIdentity:st.identity,selfIntro:!!P.operator_self_intro});
-    if(r.verdict==="OK"){ const o=operator(r.operatorId);
+    if(r.verdict==="OK"&&r.operatorId==null){
+      // Not on the roster, accepted anyway — see resolve_operator's own
+      // comment. No real id to mint, no licence fields to show.
+      emit("SLOT_COMMITTED",{slot:"operator",raw:P.operator_text,cap:cap("resolve_operator"),
+        value:{id:null,name:r.operatorName,licenceNo:null,licenceExpiry:null,uncertified:true}});
+    } else if(r.verdict==="OK"){ const o=operator(r.operatorId);
       emit("SLOT_COMMITTED",{slot:"operator",raw:P.operator_text,cap:cap("resolve_operator"),
         value:{id:o.id,name:o.name,licenceNo:o.licenceNo,licenceExpiry:o.licenceExpiry}});
       // Learned from what the worker told us — never assumed. Lands in the

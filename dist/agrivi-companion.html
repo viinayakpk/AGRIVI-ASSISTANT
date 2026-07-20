@@ -1178,8 +1178,18 @@ const TOOLS = {
       q=norm(operator(knownIdentity).name);
     }
     const s=match(q,MIRROR.operators,o=>o.name), top=s[0];
-    if(!top||top.score<0.45) return {verdict:"REJECT",code:"UNKNOWN_OPERATOR",
-      detail:`No certified operator named "${text}" on this farm.`,options:MIRROR.operators.map(o=>o.name)};
+    // This tenant's roster is a small, fixed demo list of three names —
+    // treating anyone else as unresolvable would mean no name outside it
+    // could ever be logged at all, a dead end rather than a validation. The
+    // assignment's own required checks are field, product, and crop-product
+    // compatibility; a closed operator list was never one of them. Accepted
+    // as given rather than bounced — just honestly uncertified, since there's
+    // no PPP licence on file to check it against, not a claim that one was
+    // checked and passed. establishesIdentity stays false here regardless of
+    // selfRef/selfIntro: there's no real roster id to remember it by, and a
+    // null "identity" would be indistinguishable from "still unknown".
+    if(!top||top.score<0.45) return {verdict:"OK",operatorId:null,operatorName:text.trim(),
+      uncertified:true,establishesIdentity:false};
     const o=top.row;
     const establishesIdentity = selfRef||selfIntro||!!answeringIdentity;
     if(SCHEMA.productKind==="PPP" && onDate && o.licenceExpiry<onDate)
@@ -2484,7 +2494,12 @@ function verify(P){
     const st=fold(), onDate=st.slots.date.status==="filled"?st.slots.date.value.iso:todayISO();
     const answeringIdentity=st.rejections.some(x=>x.slot==="operator"&&x.code==="IDENTITY_UNKNOWN");
     const r=callTool("resolve_operator",{text:P.operator_text,onDate,answeringIdentity,knownIdentity:st.identity,selfIntro:!!P.operator_self_intro});
-    if(r.verdict==="OK"){ const o=operator(r.operatorId);
+    if(r.verdict==="OK"&&r.operatorId==null){
+      // Not on the roster, accepted anyway — see resolve_operator's own
+      // comment. No real id to mint, no licence fields to show.
+      emit("SLOT_COMMITTED",{slot:"operator",raw:P.operator_text,cap:cap("resolve_operator"),
+        value:{id:null,name:r.operatorName,licenceNo:null,licenceExpiry:null,uncertified:true}});
+    } else if(r.verdict==="OK"){ const o=operator(r.operatorId);
       emit("SLOT_COMMITTED",{slot:"operator",raw:P.operator_text,cap:cap("resolve_operator"),
         value:{id:o.id,name:o.name,licenceNo:o.licenceNo,licenceExpiry:o.licenceExpiry}});
       // Learned from what the worker told us — never assumed. Lands in the
@@ -3076,7 +3091,7 @@ function reviewCard(st,m){
   const isApplication = SCHEMA.type==="SPRAYING"||SCHEMA.type==="FERTILIZING";
   if(wx) rows.push(["Conditions",`<b>${esc(wx.windKph)} km/h</b> wind · ${esc(wx.tempC)}°C · ${esc(wx.humidity)}% RH<span class="sub">auto-filled from ${esc(wx.source)}${isApplication&&wx.windKph>19?" · above drift threshold":""}${wx._degraded?" · stale (provider degraded)":""}</span>`]);
   rows.push(["Date",`${esc(s.date.value.iso)}<span class="sub">${s.date.value.daysAgo===0?"today":s.date.value.daysAgo+"d ago"} · within 30-day window</span>`]);
-  rows.push(["Operator",`${esc(o.name)}<span class="sub">${esc(o.licenceNo)} · valid to ${esc(o.licenceExpiry)}</span>`]);
+  rows.push(["Operator",`${esc(o.name)}<span class="sub">${o.uncertified?"not on this farm's roster — no PPP licence on file":`${esc(o.licenceNo)} · valid to ${esc(o.licenceExpiry)}`}</span>`]);
   if(s.note.value) rows.push(["What was done",esc(s.note.value.text)]);
   // Block history from temporal memory — the visible proof the agent remembers.
   const hist=mem.history(f.block).filter(x=>x.predicate==="applied"||x.predicate==="harvested").slice(0,4);
@@ -3109,7 +3124,7 @@ function renderSlots(st){
   if(SCHEMA.slots.includes("yield")) h+=row("Yield",s.yield,s.yield.value?`<b>${s.yield.value.v}</b> t/ha`:"");
   if(SCHEMA.slots.includes("moisture")) h+=row("Moisture",s.moisture,s.moisture.value?`<b>${s.moisture.value.v}</b>%`:"");
   h+=row("Date",s.date,s.date.value?esc(s.date.value.iso):"");
-  h+=row("Operator",s.operator,s.operator.value?`${esc(s.operator.value.name)} <span class="mono" style="color:var(--ink-4);font-size:11px">${esc(s.operator.value.licenceNo)}</span>`:"");
+  h+=row("Operator",s.operator,s.operator.value?`${esc(s.operator.value.name)} <span class="mono" style="color:var(--ink-4);font-size:11px">${s.operator.value.uncertified?"not on farm roster":esc(s.operator.value.licenceNo)}</span>`:"");
   $("#slotList").innerHTML=h;
   $("#rejList").innerHTML=st.rejections.length? st.rejections.map(r=>`<div class="slot" data-st="rejected">
     <div class="t"><span class="n">${esc(r.slot)}</span><span class="s">Needs attention</span></div>

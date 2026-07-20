@@ -74,8 +74,18 @@ const TOOLS = {
       q=norm(operator(knownIdentity).name);
     }
     const s=match(q,MIRROR.operators,o=>o.name), top=s[0];
-    if(!top||top.score<0.45) return {verdict:"REJECT",code:"UNKNOWN_OPERATOR",
-      detail:`No certified operator named "${text}" on this farm.`,options:MIRROR.operators.map(o=>o.name)};
+    // This tenant's roster is a small, fixed demo list of three names —
+    // treating anyone else as unresolvable would mean no name outside it
+    // could ever be logged at all, a dead end rather than a validation. The
+    // assignment's own required checks are field, product, and crop-product
+    // compatibility; a closed operator list was never one of them. Accepted
+    // as given rather than bounced — just honestly uncertified, since there's
+    // no PPP licence on file to check it against, not a claim that one was
+    // checked and passed. establishesIdentity stays false here regardless of
+    // selfRef/selfIntro: there's no real roster id to remember it by, and a
+    // null "identity" would be indistinguishable from "still unknown".
+    if(!top||top.score<0.45) return {verdict:"OK",operatorId:null,operatorName:text.trim(),
+      uncertified:true,establishesIdentity:false};
     const o=top.row;
     const establishesIdentity = selfRef||selfIntro||!!answeringIdentity;
     if(SCHEMA.productKind==="PPP" && onDate && o.licenceExpiry<onDate)

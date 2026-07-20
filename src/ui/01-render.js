@@ -69,7 +69,7 @@ function reviewCard(st,m){
   const isApplication = SCHEMA.type==="SPRAYING"||SCHEMA.type==="FERTILIZING";
   if(wx) rows.push(["Conditions",`<b>${esc(wx.windKph)} km/h</b> wind · ${esc(wx.tempC)}°C · ${esc(wx.humidity)}% RH<span class="sub">auto-filled from ${esc(wx.source)}${isApplication&&wx.windKph>19?" · above drift threshold":""}${wx._degraded?" · stale (provider degraded)":""}</span>`]);
   rows.push(["Date",`${esc(s.date.value.iso)}<span class="sub">${s.date.value.daysAgo===0?"today":s.date.value.daysAgo+"d ago"} · within 30-day window</span>`]);
-  rows.push(["Operator",`${esc(o.name)}<span class="sub">${esc(o.licenceNo)} · valid to ${esc(o.licenceExpiry)}</span>`]);
+  rows.push(["Operator",`${esc(o.name)}<span class="sub">${o.uncertified?"not on this farm's roster — no PPP licence on file":`${esc(o.licenceNo)} · valid to ${esc(o.licenceExpiry)}`}</span>`]);
   if(s.note.value) rows.push(["What was done",esc(s.note.value.text)]);
   // Block history from temporal memory — the visible proof the agent remembers.
   const hist=mem.history(f.block).filter(x=>x.predicate==="applied"||x.predicate==="harvested").slice(0,4);
@@ -102,7 +102,7 @@ function renderSlots(st){
   if(SCHEMA.slots.includes("yield")) h+=row("Yield",s.yield,s.yield.value?`<b>${s.yield.value.v}</b> t/ha`:"");
   if(SCHEMA.slots.includes("moisture")) h+=row("Moisture",s.moisture,s.moisture.value?`<b>${s.moisture.value.v}</b>%`:"");
   h+=row("Date",s.date,s.date.value?esc(s.date.value.iso):"");
-  h+=row("Operator",s.operator,s.operator.value?`${esc(s.operator.value.name)} <span class="mono" style="color:var(--ink-4);font-size:11px">${esc(s.operator.value.licenceNo)}</span>`:"");
+  h+=row("Operator",s.operator,s.operator.value?`${esc(s.operator.value.name)} <span class="mono" style="color:var(--ink-4);font-size:11px">${s.operator.value.uncertified?"not on farm roster":esc(s.operator.value.licenceNo)}</span>`:"");
   $("#slotList").innerHTML=h;
   $("#rejList").innerHTML=st.rejections.length? st.rejections.map(r=>`<div class="slot" data-st="rejected">
     <div class="t"><span class="n">${esc(r.slot)}</span><span class="s">Needs attention</span></div>
