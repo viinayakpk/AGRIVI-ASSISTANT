@@ -8,8 +8,6 @@ A schema-driven, multi-agent conversational agent that lets a field worker log a
 |---|---|
 | **① Architecture document** *(the brief's Part 1)* | [`ARCHITECTURE.md`](ARCHITECTURE.md) — the one-page answer: state management, tool design, one failure mode |
 | **② Implementation** *(the brief's Part 2)* | [`dist/agrivi-companion.html`](dist/agrivi-companion.html) — the single file to open/submit. Built from [`src/`](src/) by `node build.js` (plain concatenation, zero dependencies, no bundler) |
-| *Supplementary — deep-dive* | [`docs/ARCHITECTURE-v2.md`](docs/ARCHITECTURE-v2.md) — trust zones, agent contracts, rails, model tiering |
-| *Supplementary — platform hardening* | [`docs/PLATFORM-ARCHITECTURE.md`](docs/PLATFORM-ARCHITECTURE.md) — tenant seam, MCP, session identity, cost/guardrails research |
 | **Provider** | OpenRouter (`POST /api/v1/chat/completions`), called directly from the browser with a key you paste in — no server. Every proposer call uses **strict JSON-schema-constrained output** (`response_format: json_schema, strict:true`), not prompt-coaxed JSON |
 | **Models** | 12 agents, independently tiered, with prompt caching + a semantic response cache to cut repeat-call cost — see below |
 | **On-device** | Chrome Prompt API (Gemini Nano), JSON-schema constrained |
@@ -83,9 +81,9 @@ flowchart TB
     style SG_E fill:#f4f6f5,stroke:#6b7578,color:#000
 ```
 
-Not pictured as a node: **Rails** (⑦) — the 5-stage guardrail policy (input/dialog/retrieval/execution/output) isn't a step in the pipeline, it's a check applied *at* each of the stages above, which is why it doesn't have its own box. See [`docs/ARCHITECTURE-v2.md` §6](docs/ARCHITECTURE-v2.md#6-guardrails--nemos-five-rail-stages).
+Not pictured as a node: **Rails** (⑦) — the 5-stage guardrail policy (input/dialog/retrieval/execution/output) isn't a step in the pipeline, it's a check applied *at* each of the stages above, which is why it doesn't have its own box.
 
-**What actually happens on one message** — cancel/confirm/reject/amend are handled before anything else runs; chitchat or a question goes to Web Search, the Advisor, or Chat (which can still flag `wants_to_log` and fall through); a work description locks the schema (or re-locks it, if what's said now clearly names a *different* kind of job) and walks Normalizer → Extractor → Verifier per slot until the record is complete, then Foresight + QA Critic review it before the worker ever sees a submit button. Every branch, rejection, and retry path is the same `turn()` function in [`src/core/11-kernel.js`](src/core/11-kernel.js) — see [`docs/ARCHITECTURE-v2.md` §2](docs/ARCHITECTURE-v2.md#2-the-pipeline) for the full step-by-step.
+**What actually happens on one message** — cancel/confirm/reject/amend are handled before anything else runs; chitchat or a question goes to Web Search, the Advisor, or Chat (which can still flag `wants_to_log` and fall through); a work description locks the schema (or re-locks it, if what's said now clearly names a *different* kind of job) and walks Normalizer → Extractor → Verifier per slot until the record is complete, then Foresight + QA Critic review it before the worker ever sees a submit button. Every branch, rejection, and retry path is the same `turn()` function in [`src/core/11-kernel.js`](src/core/11-kernel.js).
 
 ---
 
@@ -162,7 +160,7 @@ The UI makes this literal: the turn physically flows left→right through the th
 | ⑧ | QA critic | Q | pre-submit only | Rubric-scored: what a rules engine can't see |
 | ⑨ | Advisor | Q | on question | Label Q&A — cached by similarity across near-duplicate questions |
 | ⑩ | Foresight | P | every record | Deterministic, offline, reads the temporal memory graph — never degrades |
-| ⑪ | Chat | Q | chitchat/questions | General conversation; never guesses a worker's name — see [session identity](docs/PLATFORM-ARCHITECTURE.md#6-session-identity--never-assumed-only-ever-told) |
+| ⑪ | Chat | Q | chitchat/questions | General conversation; never guesses a worker's name — establishes identity only from what the worker says, never a config default |
 | ⑫ | Web Search | Q | only if gated live | Its own model, its own circuit breaker, **independently toggleable** — the only agent allowed to leave farm data, and only when a deterministic keyword gate (never the model itself) decides the question needs it |
 
 **Cut:** debate, self-consistency voting, tree search. All 2–5× compute for a task whose ground truth is a database lookup. A critic that disagrees with `check_dose` is *wrong*, not interesting.
@@ -188,7 +186,7 @@ Small focused agents make per-agent model choice possible. Verified live against
 
 ### Cost-saving, researched from real GitHub adoption, not guessed
 
-Two techniques are actually implemented, not just cited — full research trail (RouteLLM, LiteLLM, FrugalGPT, Guardrails AI, NeMo-Guardrails, OWASP LLM Top 10) in [`docs/PLATFORM-ARCHITECTURE.md` §9](docs/PLATFORM-ARCHITECTURE.md#9-cost--guardrails--researched-from-real-adoption-not-guessed):
+Two techniques are actually implemented, not just cited — informed by real adoption (RouteLLM, LiteLLM, FrugalGPT, Guardrails AI, NeMo-Guardrails, OWASP LLM Top 10):
 
 - **Prompt caching** — the Extractor and Chat agents' static field/product/operator catalogue block is sent as its own [`cache_control:{type:"ephemeral"}`](https://openrouter.ai/docs/features/prompt-caching) block, ~90% cheaper on a repeat within a session ([ProjectDiscovery](https://projectdiscovery.io/blog/how-we-cut-llm-cost-with-prompt-caching) reports 60–70% real-world savings from this alone). Verified against the actual request payload shape sent to OpenRouter.
 - **Semantic response cache for the Advisor** — adapted from [`GPTCache`](https://github.com/zilliztech/GPTCache)'s idea, using this codebase's own fuzzy-match scorer instead of a new embedding dependency. A repeat label question in different words ("what's the PHI on luna" / "PHI on luna") is served from cache, $0, no round trip. Scoped to the Advisor only — a cache hit on Extractor or Chat could serve a stale number. Partitioned on the product actually named, after testing caught a real cross-product collision risk with two different products' names scoring as "the same question."
